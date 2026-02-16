@@ -1,0 +1,177 @@
+"""
+Trading constants and default parameters for the Naked Forex framework.
+
+Based on Nick Shawn's "Naked Forex" methodology and "The Mission" risk management system.
+"""
+
+from enum import Enum
+from typing import Final
+
+
+# Timeframe constants
+class TimeFrame(str, Enum):
+    """Supported chart timeframes."""
+    M1 = "1m"
+    M5 = "5m"
+    M15 = "15m"
+    M30 = "30m"
+    H1 = "1h"
+    H4 = "4h"
+    D1 = "1d"
+
+
+# Signal type constants
+class SignalType(str, Enum):
+    """Types of trading signals."""
+    BIG_WICK_BULLISH = "big_wick_bullish"
+    BIG_WICK_BEARISH = "big_wick_bearish"
+    THREE_PULSE_BULLISH = "three_pulse_bullish"
+    THREE_PULSE_BEARISH = "three_pulse_bearish"
+    A_PLUS_BUY = "a_plus_buy"
+    A_PLUS_SELL = "a_plus_sell"
+
+
+# Zone type constants
+class ZoneType(str, Enum):
+    """Types of support/resistance zones."""
+    SUPPORT = "support"
+    RESISTANCE = "resistance"
+
+
+# Trade direction constants
+class TradeDirection(str, Enum):
+    """Trade directions."""
+    LONG = "long"
+    SHORT = "short"
+
+
+# Trade status constants
+class TradeStatus(str, Enum):
+    """Trade statuses."""
+    PENDING = "pending"
+    OPEN = "open"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"
+
+
+# Trade outcome constants
+class TradeOutcome(str, Enum):
+    """Trade outcomes."""
+    WIN = "win"
+    LOSS = "loss"
+    BREAKEVEN = "breakeven"
+
+
+# Trading session constants
+class TradingSession(str, Enum):
+    """Forex trading sessions."""
+    ASIAN = "asian"
+    LONDON = "london"
+    NEW_YORK = "new_york"
+    OVERLAP = "overlap"
+
+
+# Default trading parameters
+DEFAULT_LOOKBACK_BARS: Final[int] = 500
+DEFAULT_SR_SENSITIVITY: Final[float] = 0.05  # 5%
+DEFAULT_WICK_RATIO: Final[float] = 3.0
+DEFAULT_RR_RATIO: Final[float] = 1.0
+DEFAULT_MAX_RISK: Final[float] = 0.02  # 2%
+
+# Zone detection thresholds
+FRESH_ZONE_THRESHOLD_BARS: Final[int] = 100
+MIN_PIVOT_LOOKBACK: Final[int] = 5
+MIN_ZONE_TOUCHES: Final[int] = 2
+
+# Pattern detection thresholds
+MANUAL_EXIT_BARS: Final[int] = 5
+THREE_PULSE_TOLERANCE: Final[int] = 5
+
+# Series of 10 parameters
+SERIES_OF_10_SIZE: Final[int] = 10
+
+# Confidence thresholds
+A_PLUS_MIN_CONFIDENCE: Final[float] = 0.70  # 70%
+HIGH_CONFIDENCE: Final[float] = 0.80  # 80%
+MEDIUM_CONFIDENCE: Final[float] = 0.60  # 60%
+
+# Forex pairs metadata
+FOREX_PAIRS: Final[dict[str, dict]] = {
+    "EURUSD=X": {
+        "name": "EUR/USD",
+        "pip_size": 0.0001,
+        "session": "london_new_york",
+        "spread_avg": 1.2,
+    },
+    "GBPUSD=X": {
+        "name": "GBP/USD",
+        "pip_size": 0.0001,
+        "session": "london_new_york",
+        "spread_avg": 1.5,
+    },
+    "USDJPY=X": {
+        "name": "USD/JPY",
+        "pip_size": 0.01,
+        "session": "asian_london_new_york",
+        "spread_avg": 1.1,
+    },
+    "AUDUSD=X": {
+        "name": "AUD/USD",
+        "pip_size": 0.0001,
+        "session": "asian_new_york",
+        "spread_avg": 1.3,
+    },
+    "USDCAD=X": {
+        "name": "USD/CAD",
+        "pip_size": 0.0001,
+        "session": "new_york",
+        "spread_avg": 1.4,
+    },
+    "XAUUSD=X": {
+        "name": "Gold",
+        "pip_size": 0.01,
+        "session": "london_new_york",
+        "spread_avg": 30.0,
+    },
+}
+
+# Timeframe mappings for yfinance
+TIMEFRAME_TO_YFINANCE: Final[dict[str, str]] = {
+    "1m": "1m",
+    "5m": "5m",
+    "15m": "15m",
+    "30m": "30m",
+    "1h": "1h",
+    "4h": "4h",
+    "1d": "1d",
+}
+
+# Error messages
+ERROR_MESSAGES: Final[dict[str, str]] = {
+    "invalid_ticker": "Invalid ticker symbol. Must be a valid Forex pair or commodity.",
+    "invalid_timeframe": f"Invalid timeframe. Must be one of: {[t.value for t in TimeFrame]}",
+    "wick_ratio_too_low": f"Wick ratio must be >= {DEFAULT_WICK_RATIO} for Big Wick pattern",
+    "stop_loss_invalid_long": "Stop loss must be below entry price for LONG trades",
+    "stop_loss_invalid_short": "Stop loss must be above entry price for SHORT trades",
+    "take_profit_invalid_long": "Take profit must be above entry price for LONG trades",
+    "take_profit_invalid_short": "Take profit must be below entry price for SHORT trades",
+    "risk_too_high": f"Risk per trade cannot exceed {DEFAULT_MAX_RISK * 100}% of account balance",
+    "series_complete": "Series of 10 is complete. Start a new series to log more trades.",
+}
+
+# Success messages
+SUCCESS_MESSAGES: Final[dict[str, str]] = {
+    "trade_logged": "Trade logged successfully",
+    "series_created": "New Series of 10 created",
+    "series_completed": "Series of 10 completed successfully",
+    "signal_detected": "A+ setup detected",
+}
+
+# Discord embed colors
+DISCORD_COLORS: Final[dict[str, int]] = {
+    "buy": 0x00FF00,  # Green
+    "sell": 0xFF0000,  # Red
+    "info": 0x0099FF,  # Blue
+    "warning": 0xFFAA00,  # Orange
+    "success": 0x00FF00,  # Green
+}
