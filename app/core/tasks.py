@@ -44,10 +44,64 @@ class BackgroundTaskManager:
         # Callback for when A+ setups are found
         self.on_setup_found: Callable | None = None
 
+        # Track sent alerts to avoid duplicates
+        # Key: ticker + timeframe + timestamp + entry_price
+        self._sent_alerts: set[str] = set()
+
         logger.info(
             f"BackgroundTaskManager initialized: "
             f"scan_interval={self.settings.scan_interval_minutes}min"
         )
+
+    def _get_setup_key(self, setup) -> str:
+        """
+        Generate a unique key for a setup to track sent alerts.
+
+        Args:
+            setup: SignalResponse setup
+
+        Returns:
+            Unique string key for this setup
+        """
+        return (
+            f"{setup.big_wick.ticker}|"
+            f"{setup.big_wick.timeframe}|"
+            f"{setup.big_wick.timestamp.isoformat()}|"
+            f"{setup.big_wick.entry_price:.5f}|"
+            f"{'buy' if setup.is_buy else 'sell'}"
+        )
+
+    def _is_alert_sent(self, setup) -> bool:
+        """
+        Check if an alert has already been sent for this setup.
+
+        Args:
+            setup: SignalResponse setup
+
+        Returns:
+            True if alert was already sent
+        """
+        key = self._get_setup_key(setup)
+        return key in self._sent_alerts
+
+    def _mark_alert_sent(self, setup):
+        """
+        Mark an alert as sent for this setup.
+
+        Args:
+            setup: SignalResponse setup
+        """
+        key = self._get_setup_key(setup)
+        self._sent_alerts.add(key)
+
+        # Keep set size manageable - remove old entries if too many
+        # This prevents unbounded memory growth
+        if len(self._sent_alerts) > 1000:
+            # Remove oldest entries (first 100)
+            keys_to_remove = list(self._sent_alerts)[:100]
+            for key in keys_to_remove:
+                self._sent_alerts.remove(key)
+            logger.debug(f"Pruned sent alerts cache, now {len(self._sent_alerts)} entries")
 
     async def start_scanning(self):
         """Start the background scanning task."""
@@ -97,15 +151,24 @@ class BackgroundTaskManager:
 
                         if setups:
                             logger.info(f"Found {len(setups)} A+ setup(s) for {ticker}")
-                            total_setups += len(setups)
 
-                            # Send Discord alerts
-                            for setup in setups:
-                                await self.discord_service.send_alert(setup)
+                            # Filter out already-sent setups
+                            new_setups = [s for s in setups if not self._is_alert_sent(s)]
 
-                                # Call callback if registered
-                                if self.on_setup_found:
-                                    await self.on_setup_found(setup)
+                            if new_setups:
+                                logger.info(f"Sending {len(new_setups)} new alert(s) for {ticker}")
+                                total_setups += len(new_setups)
+
+                                # Send Discord alerts only for new setups
+                                for setup in new_setups:
+                                    await self.discord_service.send_alert(setup)
+                                    self._mark_alert_sent(setup)
+
+                                    # Call callback if registered
+                                    if self.on_setup_found:
+                                        await self.on_setup_found(setup)
+                            else:
+                                logger.debug(f"No new setups for {ticker} (all already sent)")
 
                     except Exception as e:
                         logger.error(f"Error scanning {ticker}: {e}")
@@ -147,21 +210,31 @@ class BackgroundTaskManager:
                 )
 
                 if setups:
+                    # Filter out already-sent setups
+                    new_setups = [s for s in setups if not self._is_alert_sent(s)]
+                    old_setups = [s for s in setups if self._is_alert_sent(s)]
+
                     results[ticker] = {
                         "count": len(setups),
+                        "new_count": len(new_setups),
                         "buy_signals": len([s for s in setups if s.is_buy]),
                         "sell_signals": len([s for s in setups if s.is_sell]),
                         "setups": setups
                     }
-                    total_setups += len(setups)
+                    total_setups += len(new_setups)
 
-                    # Send alerts for high-confidence setups
-                    for setup in setups:
+                    # Send alerts only for new high-confidence setups
+                    for setup in new_setups:
                         if setup.combined_confidence >= 0.75:
                             await self.discord_service.send_alert(setup)
+                            self._mark_alert_sent(setup)
+
+                    logger.info(
+                        f"{ticker}: {len(new_setups)} new, {len(old_setups)} already sent"
+                    )
 
                 else:
-                    results[ticker] = {"count": 0}
+                    results[ticker] = {"count": 0, "new_count": 0}
 
             except Exception as e:
                 logger.error(f"Error scanning {ticker}: {e}")
@@ -191,3 +264,18 @@ class BackgroundTaskManager:
     def get_scan_interval_minutes(self) -> int:
         """Get current scan interval in minutes."""
         return self._scan_interval // 60
+
+    def clear_sent_alerts(self):
+        """
+        Clear the sent alerts cache.
+
+        This allows all setups to be sent again on the next scan.
+        Useful for testing or after server restart.
+        """
+        count = len(self._sent_alerts)
+        self._sent_alerts.clear()
+        logger.info(f"Cleared {count} sent alerts from cache")
+
+    def get_sent_alerts_count(self) -> int:
+        """Get the number of alerts currently tracked in the cache."""
+        return len(self._sent_alerts)
