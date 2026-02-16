@@ -1,7 +1,7 @@
 """
 Database session management for SQLAlchemy with async support.
 
-Uses aiosqlite for async SQLite operations.
+Uses aiosqlite for async SQLite operations and asyncpg for PostgreSQL.
 """
 
 from typing import AsyncGenerator
@@ -10,14 +10,9 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase
 
 from app.config.settings import get_settings
-
-
-class Base(DeclarativeBase):
-    """Base class for all ORM models."""
-    pass
+from app.db.base import Base
 
 
 # Global engine and session maker
@@ -30,8 +25,10 @@ def get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
+        # Use Postgres if configured, otherwise fall back to SQLite
+        database_url = settings.postgres_url if settings.postgres_url else settings.database_url
         _engine = create_async_engine(
-            settings.database_url,
+            database_url,
             echo=settings.debug,
             future=True
         )
@@ -86,6 +83,7 @@ async def init_db() -> None:
         # Import all models here to ensure they're registered with Base
         from app.db.models.user import User
         from app.db.models.trade import Trade, TradeSeries
+        from app.db.models.sent_alert import SentAlert
 
         await conn.run_sync(Base.metadata.create_all)
 

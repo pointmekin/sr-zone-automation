@@ -6,10 +6,14 @@ Uses asyncio for background scanning and Discord alerts.
 
 import asyncio
 from typing import Optional, Callable
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.pattern_detection import PatternDetectionService
 from app.services.discord_service import DiscordBotService
 from app.config.settings import get_settings
+from app.db.session import get_db
+from app.db.models.sent_alert import SentAlert
 from loguru import logger
 
 
@@ -44,9 +48,9 @@ class BackgroundTaskManager:
         # Callback for when A+ setups are found
         self.on_setup_found: Callable | None = None
 
-        # Track sent alerts to avoid duplicates
-        # Key: ticker + timeframe + timestamp + entry_price
-        self._sent_alerts: set[str] = set()
+        # In-memory cache for recently sent alerts (reduces DB queries)
+        self._recent_alerts_cache: set[str] = set()
+        self._cache_max_size = 1000
 
         logger.info(
             f"BackgroundTaskManager initialized: "
@@ -71,37 +75,71 @@ class BackgroundTaskManager:
             f"{'buy' if setup.is_buy else 'sell'}"
         )
 
-    def _is_alert_sent(self, setup) -> bool:
+    async def _is_alert_sent(self, db: AsyncSession, setup) -> bool:
         """
         Check if an alert has already been sent for this setup.
 
+        Checks both the in-memory cache (fast path) and database (persistent).
+
         Args:
+            db: Database session
             setup: SignalResponse setup
 
         Returns:
             True if alert was already sent
         """
+        # Fast path: check in-memory cache first
         key = self._get_setup_key(setup)
-        return key in self._sent_alerts
+        if key in self._recent_alerts_cache:
+            return True
 
-    def _mark_alert_sent(self, setup):
+        # Slow path: check database
+        components = SentAlert.create_key_components(setup)
+        result = await db.execute(
+            select(SentAlert).where(
+                SentAlert.ticker == components['ticker'],
+                SentAlert.timeframe == components['timeframe'],
+                SentAlert.candle_timestamp == components['candle_timestamp'],
+                SentAlert.entry_price == components['entry_price'],
+                SentAlert.direction == components['direction']
+            )
+        )
+        return result.first() is not None
+
+    async def _mark_alert_sent(self, db: AsyncSession, setup):
         """
-        Mark an alert as sent for this setup.
+        Mark an alert as sent for this setup by storing in database.
 
         Args:
+            db: Database session
             setup: SignalResponse setup
         """
         key = self._get_setup_key(setup)
-        self._sent_alerts.add(key)
+        components = SentAlert.create_key_components(setup)
 
-        # Keep set size manageable - remove old entries if too many
-        # This prevents unbounded memory growth
-        if len(self._sent_alerts) > 1000:
-            # Remove oldest entries (first 100)
-            keys_to_remove = list(self._sent_alerts)[:100]
-            for key in keys_to_remove:
-                self._sent_alerts.remove(key)
-            logger.debug(f"Pruned sent alerts cache, now {len(self._sent_alerts)} entries")
+        # Add to database
+        sent_alert = SentAlert(
+            ticker=components['ticker'],
+            timeframe=components['timeframe'],
+            candle_timestamp=components['candle_timestamp'],
+            entry_price=components['entry_price'],
+            direction=components['direction'],
+            confidence=components.get('confidence'),
+            sent_successfully=True
+        )
+        db.add(sent_alert)
+        await db.flush()  # Get the ID without committing
+
+        # Add to in-memory cache
+        self._recent_alerts_cache.add(key)
+
+        # Prune cache if too large
+        if len(self._recent_alerts_cache) > self._cache_max_size:
+            # Remove oldest entries (convert set to list and slice)
+            keys_to_remove = list(self._recent_alerts_cache)[:100]
+            for k in keys_to_remove:
+                self._recent_alerts_cache.remove(k)
+            logger.debug(f"Pruned alerts cache, now {len(self._recent_alerts_cache)} entries")
 
     async def start_scanning(self):
         """Start the background scanning task."""
@@ -138,48 +176,56 @@ class BackgroundTaskManager:
 
                 total_setups = 0
 
-                for ticker in self.settings.default_tickers:
-                    if not self._running:
-                        break
+                # Get database session for this scan
+                async for db in get_db():
+                    for ticker in self.settings.default_tickers:
+                        if not self._running:
+                            break
 
-                    try:
-                        setups = await self.pattern_service.detect_a_plus_setups(
-                            ticker=ticker,
-                            timeframe="15m",
-                            min_confidence=0.75  # Higher threshold for auto-alerts
-                        )
+                        try:
+                            setups = await self.pattern_service.detect_a_plus_setups(
+                                ticker=ticker,
+                                timeframe="15m",
+                                min_confidence=0.75  # Higher threshold for auto-alerts
+                            )
 
-                        if setups:
-                            logger.info(f"Found {len(setups)} A+ setup(s) for {ticker}")
+                            if setups:
+                                logger.info(f"Found {len(setups)} A+ setup(s) for {ticker}")
 
-                            # Filter out already-sent setups
-                            new_setups = [s for s in setups if not self._is_alert_sent(s)]
+                                # Filter out already-sent setups
+                                new_setups = []
+                                for setup in setups:
+                                    if not await self._is_alert_sent(db, setup):
+                                        new_setups.append(setup)
 
-                            if new_setups:
-                                logger.info(f"Sending {len(new_setups)} new alert(s) for {ticker}")
-                                total_setups += len(new_setups)
+                                if new_setups:
+                                    logger.info(f"Sending {len(new_setups)} new alert(s) for {ticker}")
+                                    total_setups += len(new_setups)
 
-                                # Send Discord alerts only for new setups
-                                for setup in new_setups:
-                                    await self.discord_service.send_alert(setup)
-                                    self._mark_alert_sent(setup)
+                                    # Send Discord alerts only for new setups
+                                    for setup in new_setups:
+                                        await self.discord_service.send_alert(setup)
+                                        await self._mark_alert_sent(db, setup)
 
-                                    # Call callback if registered
-                                    if self.on_setup_found:
-                                        await self.on_setup_found(setup)
-                            else:
-                                logger.debug(f"No new setups for {ticker} (all already sent)")
+                                        # Call callback if registered
+                                        if self.on_setup_found:
+                                            await self.on_setup_found(setup)
+                                else:
+                                    logger.debug(f"No new setups for {ticker} (all already sent)")
 
-                    except Exception as e:
-                        logger.error(f"Error scanning {ticker}: {e}")
+                        except Exception as e:
+                            logger.error(f"Error scanning {ticker}: {e}")
 
-                if total_setups > 0:
-                    logger.info(f"Periodic scan complete: {total_setups} A+ setup(s) found")
-                else:
-                    logger.info("Periodic scan complete: No A+ setups found")
+                    # Commit all database changes at the end of the scan
+                    await db.commit()
 
-                # Wait for next scan
-                await asyncio.sleep(self._scan_interval)
+                    if total_setups > 0:
+                        logger.info(f"Periodic scan complete: {total_setups} A+ setup(s) found")
+                    else:
+                        logger.info("Periodic scan complete: No A+ setups found")
+
+                    # Wait for next scan
+                    await asyncio.sleep(self._scan_interval)
 
             except asyncio.CancelledError:
                 logger.info("Scan loop cancelled")
@@ -201,44 +247,61 @@ class BackgroundTaskManager:
         results = {}
         total_setups = 0
 
-        for ticker in self.settings.default_tickers:
-            try:
-                setups = await self.pattern_service.detect_a_plus_setups(
-                    ticker=ticker,
-                    timeframe="15m",
-                    min_confidence=0.7
-                )
-
-                if setups:
-                    # Filter out already-sent setups
-                    new_setups = [s for s in setups if not self._is_alert_sent(s)]
-                    old_setups = [s for s in setups if self._is_alert_sent(s)]
-
-                    results[ticker] = {
-                        "count": len(setups),
-                        "new_count": len(new_setups),
-                        "buy_signals": len([s for s in setups if s.is_buy]),
-                        "sell_signals": len([s for s in setups if s.is_sell]),
-                        "setups": setups
-                    }
-                    total_setups += len(new_setups)
-
-                    # Send alerts only for new high-confidence setups
-                    for setup in new_setups:
-                        if setup.combined_confidence >= 0.75:
-                            await self.discord_service.send_alert(setup)
-                            self._mark_alert_sent(setup)
-
-                    logger.info(
-                        f"{ticker}: {len(new_setups)} new, {len(old_setups)} already sent"
+        # Get database session for this scan
+        async for db in get_db():
+            for ticker in self.settings.default_tickers:
+                try:
+                    setups = await self.pattern_service.detect_a_plus_setups(
+                        ticker=ticker,
+                        timeframe="15m",
+                        min_confidence=0.7
                     )
 
-                else:
-                    results[ticker] = {"count": 0, "new_count": 0}
+                    if setups:
+                        # Filter out already-sent setups
+                        new_setups = []
+                        old_setups = []
+                        for setup in setups:
+                            if await self._is_alert_sent(db, setup):
+                                old_setups.append(setup)
+                            else:
+                                new_setups.append(setup)
 
-            except Exception as e:
-                logger.error(f"Error scanning {ticker}: {e}")
-                results[ticker] = {"error": str(e)}
+                        results[ticker] = {
+                            "count": len(setups),
+                            "new_count": len(new_setups),
+                            "buy_signals": len([s for s in setups if s.is_buy]),
+                            "sell_signals": len([s for s in setups if s.is_sell]),
+                            "setups": setups
+                        }
+                        total_setups += len(new_setups)
+
+                        # Send alerts only for new high-confidence setups
+                        for setup in new_setups:
+                            if setup.combined_confidence >= 0.75:
+                                try:
+                                    await self.discord_service.send_alert(setup)
+                                    await self._mark_alert_sent(db, setup)
+                                except Exception as e:
+                                    # Handle duplicate key errors or other DB errors
+                                    logger.warning(f"Failed to mark alert as sent for {ticker}: {e}")
+                                    await db.rollback()
+                                    # Add to in-memory cache anyway to prevent retries
+                                    self._recent_alerts_cache.add(self._get_setup_key(setup))
+
+                        logger.info(
+                            f"{ticker}: {len(new_setups)} new, {len(old_setups)} already sent"
+                        )
+
+                    else:
+                        results[ticker] = {"count": 0, "new_count": 0}
+
+                except Exception as e:
+                    logger.error(f"Error scanning {ticker}: {e}")
+                    results[ticker] = {"error": str(e)}
+
+            # Commit all changes
+            await db.commit()
 
         logger.info(f"One-time scan complete: {total_setups} A+ setup(s) found")
 
@@ -265,17 +328,36 @@ class BackgroundTaskManager:
         """Get current scan interval in minutes."""
         return self._scan_interval // 60
 
-    def clear_sent_alerts(self):
+    async def clear_sent_alerts(self):
         """
-        Clear the sent alerts cache.
+        Clear the sent alerts cache (both memory and database).
 
         This allows all setups to be sent again on the next scan.
         Useful for testing or after server restart.
         """
-        count = len(self._sent_alerts)
-        self._sent_alerts.clear()
-        logger.info(f"Cleared {count} sent alerts from cache")
+        # Clear in-memory cache
+        cache_count = len(self._recent_alerts_cache)
+        self._recent_alerts_cache.clear()
 
-    def get_sent_alerts_count(self) -> int:
-        """Get the number of alerts currently tracked in the cache."""
-        return len(self._sent_alerts)
+        # Clear database
+        async for db in get_db():
+            from sqlalchemy import delete
+            await db.execute(delete(SentAlert))
+            await db.commit()
+
+            # Get count of deleted rows
+            result = await db.execute(select(SentAlert))
+            db_count = len(result.all())
+
+        logger.info(f"Cleared {cache_count} from cache, {db_count} from database")
+
+    async def get_sent_alerts_count(self) -> int:
+        """Get the number of alerts currently tracked in the database."""
+        async for db in get_db():
+            result = await db.execute(select(SentAlert))
+            return len(result.all())
+        return 0
+
+    def get_cache_size(self) -> int:
+        """Get the number of alerts currently in the in-memory cache."""
+        return len(self._recent_alerts_cache)

@@ -117,9 +117,13 @@ class Settings(BaseSettings):
     )
 
     # Database
+    postgres_url: str = Field(
+        default="",
+        description="PostgreSQL connection URL (recommended for production)"
+    )
     database_url: str = Field(
         default="sqlite+aiosqlite:///./naked_forex.db",
-        description="Database connection URL"
+        description="Database connection URL (SQLite fallback)"
     )
 
     # Authentication
