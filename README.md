@@ -28,13 +28,18 @@ Based on the Nick Shawn "Naked Forex" methodology:
 ### Prerequisites
 
 - Python 3.14+
-- [uv](https://docs.astral.sh/uv/) package manager
+- [uv](https://docs.astral.sh/uv/) package manager (recommended) OR standard venv
 
 ### Installation
 
+#### Option 1: Using uv (Recommended)
+
 ```bash
-# Install dependencies
+# Install dependencies (uv will use Python 3.14 from .python-version file)
 uv sync
+
+# OR if you need to specify Python version explicitly:
+uv sync --python 3.14
 
 # Create .env from template
 cp .env.example .env
@@ -45,15 +50,55 @@ cp .env.example .env
 # - Configure trading parameters
 
 # Initialize database
+uv run python scripts/init_db.py
+
+# Start the API server
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+#### Option 2: Using venv (Traditional)
+
+```bash
+# Create virtual environment with Python 3.14
+/opt/homebrew/bin/python3.14 -m venv .venv
+# OR if python3 points to 3.14:
+python3 -m venv .venv
+
+# Activate the virtual environment
+# On macOS/Linux:
+source .venv/bin/activate
+# On Windows:
+.venv\Scripts\activate
+
+# Install dependencies
+pip install -e .
+
+# Create .env from template
+cp .env.example .env
+
+# Update .env with your settings
+# - Generate a secure SECRET_KEY (use: python -c "import secrets; print(secrets.token_urlsafe(32))")
+# - Add Discord token (optional)
+# - Configure trading parameters
+
+# Initialize database
 python scripts/init_db.py
 
 # Start the API server
-uv run uvicorn app.main:app --reload
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 The API will be available at [http://localhost:8000](http://localhost:8000)
 
 Interactive documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+### Important Notes
+
+- **Python version**: The project requires Python 3.14+. A `.python-version` file is included to tell uv which version to use
+- **uv users**: Run `uv python list` to see available Python versions, or `uv python install 3.14` to install via uv
+- **macOS users**: If you have multiple Python versions, ensure you're using Python 3.14+ from Homebrew: `/opt/homebrew/bin/python3.14`
+- **Verify Python version**: Run `uv run python --version` (uv) or `python --version` after activating venv to confirm
+- **Discord alerts**: The bot starts automatically when `DISCORD_TOKEN` is set in `.env`
 
 ## API Endpoints
 
@@ -271,8 +316,11 @@ finance-automation/
 ### Running Tests
 
 ```bash
-# Run all tests
+# Using uv:
 uv run pytest
+
+# Using venv (ensure venv is activated first):
+pytest
 
 # Run with coverage
 uv run pytest --cov=app --cov-report=html
@@ -284,14 +332,15 @@ uv run pytest tests/test_api/test_signals.py
 ### Code Quality
 
 ```bash
-# Format code
+# Using uv:
 uv run black app/
-
-# Lint code
 uv run ruff check app/
-
-# Type checking
 uv run mypy app/
+
+# Using venv (ensure venv is activated first):
+black app/
+ruff check app/
+mypy app/
 ```
 
 ## Architecture Decisions

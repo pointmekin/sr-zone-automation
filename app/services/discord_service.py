@@ -71,7 +71,30 @@ class DiscordBot(commands.Bot):
             return
 
         try:
+            # Try get_channel first (from cache)
             channel = self.get_channel(channel_id)
+
+            # If not in cache, try fetching from API
+            if not channel:
+                logger.warning(f"Channel {channel_id} not in cache, attempting to fetch from API...")
+                try:
+                    channel = await self.fetch_channel(channel_id)
+                except discord.NotFound:
+                    logger.error(f"Channel {channel_id} not found (404) - bot may not have access")
+                    # Log available guilds/servers for debugging
+                    guilds = list(self.guilds)
+                    logger.error(f"Bot is in {len(guilds)} server(s): {[g.name for g in guilds]}")
+                    for guild in guilds:
+                        channels = [c.name for c in guild.channels if c.permissions_for(guild.me).send_messages]
+                        logger.error(f"  Server '{guild.name} - accessible channels: {channels}")
+                    return
+                except discord.Forbidden:
+                    logger.error(f"Bot doesn't have permission to access channel {channel_id}")
+                    return
+                except Exception as e:
+                    logger.error(f"Error fetching channel {channel_id}: {e}")
+                    return
+
             if not channel:
                 logger.error(f"Could not find Discord channel {channel_id}")
                 return

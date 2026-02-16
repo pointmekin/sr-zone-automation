@@ -13,7 +13,7 @@ from typing import List
 class Settings(BaseSettings):
     """Application settings with environment-based configuration."""
 
-    _model_config: ConfigDict = SettingsConfigDict(
+    model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
