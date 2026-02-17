@@ -45,12 +45,12 @@ WORKDIR /app
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
 
-# Copy application code
-COPY --chown=appuser:appuser app ./app
-
-# Create necessary directories
+# Create necessary directories with correct ownership
 RUN mkdir -p /app/logs /app/cache && \
     chown -R appuser:appuser /app/logs /app/cache
+
+# Copy application code
+COPY --chown=appuser:appuser app ./app
 
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH"
