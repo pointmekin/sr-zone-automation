@@ -29,11 +29,14 @@ jobs:
             mkdir -p backups
             cp .env backups/.env.$(date +%Y%m%d_%H%M%S)
 
-            # Rebuild and restart
-            docker-compose build --no-cache
-            docker-compose up -d --force-recreate
+            # Stop and remove existing containers
+            docker-compose down
 
-            # Wait for container to start
+            # Rebuild and start
+            docker-compose build --no-cache
+            docker-compose up -d
+
+            # Wait for container to be healthy
             sleep 30
 
             # Health check
