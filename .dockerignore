@@ -74,8 +74,7 @@ docker-compose.yml
 .dockerignore
 
 # Documentation
-README.md
-*.md
+# NOTE: README.md is needed by pyproject.toml for package build, so don't exclude it
 docs/
 
 # Claude/Plans
