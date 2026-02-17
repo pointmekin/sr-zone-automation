@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  finance-automation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: naked-forex-api:latest
+    container_name: finance-automation-app
+
+    # Port mapping
+    ports:
+      - "8000:8000"
+
+    # Environment file (must exist before starting)
+    env_file:
+      - .env
+
+    # Volume mounts
+    volumes:
+      # Persist logs outside container
+      - ./logs:/app/logs
+      # Cache directory for yfinance data
+      - ./cache:/app/cache
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Resource limits (adjust based on VPS specs)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Network mode (bridge is default)
+    network_mode: bridge
