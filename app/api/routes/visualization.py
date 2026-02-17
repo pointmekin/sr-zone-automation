@@ -7,7 +7,7 @@ and watchlist dashboards.
 
 from typing import Annotated, List
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 
 from app.api.deps import (
@@ -23,8 +23,10 @@ from loguru import logger
 router = APIRouter(prefix="/charts", tags=["visualization"])
 
 
+@router.get("/generate", response_class=HTMLResponse)
 @router.post("/generate", response_class=HTMLResponse)
 async def generate_chart(
+    request: Request,
     ticker: str = Query(..., description="Ticker symbol (e.g., EURUSD=X)"),
     timeframe: str = Query(default="15m", description="Chart timeframe"),
     lookback_bars: int = Query(default=200, ge=50, le=1000, description="Lookback bars"),
@@ -104,6 +106,7 @@ async def generate_watchlist_charts(
 
 @router.get("/chart-embed/{ticker}")
 async def get_chart_embed(
+    request: Request,
     ticker: str,
     timeframe: str = "15m",
     current_user: Annotated[User | None, Depends(get_optional_user)] = None,
@@ -118,8 +121,9 @@ async def get_chart_embed(
     if viz_service is None:
         viz_service = get_viz_service()
 
-    # Generate the chart URL
-    chart_url = f"/api/v1/charts/generate?ticker={ticker}&timeframe={timeframe}"
+    # Generate the absolute chart URL
+    base_url = f"{request.url.scheme}://{request.url.netloc}"
+    chart_url = f"{base_url}/api/v1/charts/generate?ticker={ticker}&timeframe={timeframe}"
 
     embed_code = f'''
 <!-- Naked Forex Chart Embed -->
