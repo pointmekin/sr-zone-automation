@@ -31,7 +31,7 @@ FROM python:3.14-slim-bookworm
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y \
     curl \
-    su-exec \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for runtime use

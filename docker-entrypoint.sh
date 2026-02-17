@@ -11,7 +11,7 @@ fi
 
 # Run the main command as appuser
 if [ "$(id -u)" = "0" ]; then
-    exec su-exec appuser "$@"
+    exec gosu appuser "$@"
 else
     exec "$@"
 fi
