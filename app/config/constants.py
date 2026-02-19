@@ -38,6 +38,15 @@ class ZoneType(str, Enum):
     RESISTANCE = "resistance"
 
 
+# SR Detection Profile presets
+class SRDetectionProfile(str, Enum):
+    """SR Detection preset profiles for different trading styles."""
+    CONSERVATIVE = "conservative"  # Wider zones, fewer signals, higher confidence
+    BALANCED = "balanced"  # Current working parameters (0.5 ATR zone width)
+    AGGRESSIVE = "aggressive"  # Tighter zones, more signals, scalping-focused
+    CUSTOM = "custom"  # User-defined parameters
+
+
 # Trade direction constants
 class TradeDirection(str, Enum):
     """Trade directions."""
@@ -83,6 +92,21 @@ FRESH_ZONE_THRESHOLD_BARS: Final[int] = 100
 MIN_PIVOT_LOOKBACK: Final[int] = 5
 MIN_ZONE_TOUCHES: Final[int] = 2
 
+# Improved SR Detection Parameters
+USE_ATR_THRESHOLDS: Final[bool] = True
+SENSITIVITY_ATR_MULTIPLIER: Final[float] = 0.3  # 0.3 ATR units for clustering (tighter)
+ZONE_WIDTH_ATR_MULTIPLIER: Final[float] = 0.5  # 0.5 ATR units for zone width (wide buffer)
+ATR_PERIOD: Final[int] = 14
+MIN_PIVOT_DISTANCE_BARS: Final[int] = 5  # Minimum bars between pivots (reduced)
+USE_VOLUME_CONFIRMATION: Final[bool] = False  # Disabled by default
+VOLUME_CONFIRMATION_THRESHOLD: Final[float] = 0.5  # 50% of average volume
+MAX_ZONE_AGE_BARS: Final[int] = 500
+RECENCY_WEIGHT: Final[float] = 0.4
+TOUCH_WEIGHT: Final[float] = 0.6
+ROUND_NUMBER_PROXIMITY: Final[float] = 0.001  # 0.1% for round numbers
+OVERLAP_REMOVAL_THRESHOLD: Final[float] = 0.7  # 70% overlap
+MIN_ZONE_STRENGTH: Final[float] = 0.0  # No minimum by default
+
 # Pattern detection thresholds
 MANUAL_EXIT_BARS: Final[int] = 5
 THREE_PULSE_TOLERANCE: Final[int] = 5
@@ -94,6 +118,69 @@ SERIES_OF_10_SIZE: Final[int] = 10
 A_PLUS_MIN_CONFIDENCE: Final[float] = 0.70  # 70%
 HIGH_CONFIDENCE: Final[float] = 0.80  # 80%
 MEDIUM_CONFIDENCE: Final[float] = 0.60  # 60%
+
+# SR Detection Profile Presets
+# Each preset defines complete parameter sets for different trading styles
+SR_DETECTION_PRESETS: Final[dict[str, dict]] = {
+    "conservative": {
+        # Wider zones, fewer pivots, stricter filtering
+        "use_atr_thresholds": True,
+        "sensitivity_atr_multiplier": 0.4,  # Tighter clustering
+        "zone_width_atr_multiplier": 0.7,  # Wider zone buffer
+        "atr_period": 14,
+        "min_pivot_distance_bars": 10,  # Fewer pivots
+        "use_volume_confirmation": False,
+        "overlap_removal_threshold": 0.7,
+        "min_zone_strength": 0.4,  # Filter weak zones
+        "recency_weight": 0.5,
+        "touch_weight": 0.5,
+        "round_number_proximity": 0.001,
+        "min_pivot_lookback": 7,  # Larger lookback
+        "min_zone_touches": 3,  # Require more touches
+        "fresh_zone_threshold": 100,
+    },
+    "balanced": {
+        # Current working values (default)
+        "use_atr_thresholds": True,
+        "sensitivity_atr_multiplier": 0.3,  # Current working value
+        "zone_width_atr_multiplier": 0.5,  # Current working value
+        "atr_period": 14,
+        "min_pivot_distance_bars": 5,
+        "use_volume_confirmation": False,
+        "overlap_removal_threshold": 0.7,
+        "min_zone_strength": 0.0,
+        "recency_weight": 0.4,
+        "touch_weight": 0.6,
+        "round_number_proximity": 0.001,
+        "min_pivot_lookback": 5,
+        "min_zone_touches": 2,
+        "fresh_zone_threshold": 100,
+    },
+    "aggressive": {
+        # Tighter zones, more pivots, more signals
+        "use_atr_thresholds": True,
+        "sensitivity_atr_multiplier": 0.2,  # Very tight clustering
+        "zone_width_atr_multiplier": 0.3,  # Narrower zones
+        "atr_period": 14,
+        "min_pivot_distance_bars": 3,  # More pivots
+        "use_volume_confirmation": False,
+        "overlap_removal_threshold": 0.8,  # Stricter overlap removal
+        "min_zone_strength": 0.0,  # Accept all zones
+        "recency_weight": 0.3,  # Less emphasis on recency
+        "touch_weight": 0.7,
+        "round_number_proximity": 0.001,
+        "min_pivot_lookback": 3,  # Smaller lookback
+        "min_zone_touches": 2,
+        "fresh_zone_threshold": 50,  # Shorter fresh window
+    },
+}
+
+# Periodic Scan Configuration
+# Best configuration for hourly trade setup notifications
+SCAN_TIMEFRAME: Final[str] = "1h"  # 1-hour timeframe for swing trading setups
+SCAN_MIN_CONFIDENCE: Final[float] = 0.75  # 75% minimum confidence for auto-alerts
+SCAN_SR_PROFILE: Final[str] = "conservative"  # Conservative profile for higher quality zones
+SCAN_INTERVAL_MINUTES: Final[int] = 15  # Scan every 15 minutes
 
 # Forex pairs metadata
 FOREX_PAIRS: Final[dict[str, dict]] = {

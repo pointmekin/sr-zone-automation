@@ -47,25 +47,54 @@ class SRZone(BaseModel):
         description="When zone was detected"
     )
 
-    # Zone width parameter (half-width on each side)
-    zone_width_percent: float = Field(
-        default=0.005,
-        ge=0.001,
-        le=0.02,
-        description="Zone width as percentage (0.005 = 0.5% each side)"
+    # Price range is set by the detection service based on ATR or fixed percentage
+    price_range: tuple[float, float] = Field(
+        default=(0.0, 0.0),
+        description="Price range of the zone (lower_bound, upper_bound)"
     )
 
-    @computed_field
-    @property
-    def price_range(self) -> tuple[float, float]:
-        """Price range of the zone (lower_bound, upper_bound)."""
-        half_width = self.level * self.zone_width_percent
-        if self.zone_type == ZoneType.SUPPORT:
-            # For support, zone extends below the level
-            return (self.level - half_width, self.level + half_width * 0.5)
-        else:
-            # For resistance, zone extends above the level
-            return (self.level - half_width * 0.5, self.level + half_width)
+    # Improved fields for enhanced zone analysis
+    first_touch_date: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp of first touch (zone origin)"
+    )
+    pivot_indices: list[int] = Field(
+        default_factory=list,
+        description="Indices of candles that formed this zone"
+    )
+    volume_at_zone: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Average volume at zone touches"
+    )
+    round_number_factor: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Proximity to psychological round number (0-1)"
+    )
+    time_span_bars: int = Field(
+        default=0,
+        ge=0,
+        description="Time span from first to last touch in bars"
+    )
+    last_touch_bars_ago: int = Field(
+        default=0,
+        ge=0,
+        description="Number of bars since last touch"
+    )
+    touch_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Touch count component of strength"
+    )
+    recency_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Recency component of strength"
+    )
 
     @computed_field
     @property
@@ -331,3 +360,52 @@ class SignalListResponse(BaseModel):
     def has_signals(self) -> bool:
         """True if there are any signals."""
         return self.total_count > 0
+
+
+class ScanSummary(BaseModel):
+    """
+    Simplified summary of a trading signal for scan results.
+
+    Contains only the most relevant information to reduce noise.
+    """
+
+    ticker: str = Field(description="Ticker symbol")
+    timeframe: str = Field(description="Chart timeframe")
+    signal_type: SignalType = Field(description="Type of signal")
+    direction: str = Field(description="Trade direction (buy/sell)")
+    entry_price: float = Field(description="Suggested entry price")
+    stop_loss: float = Field(description="Suggested stop loss level")
+    take_profit: float = Field(description="Suggested take profit level")
+    risk_reward: float = Field(description="Risk-reward ratio")
+    confidence: float = Field(description="Signal confidence (0-1)")
+    zone_level: float = Field(description="Associated S/R zone level")
+    zone_strength: float = Field(description="S/R zone strength (0-1)")
+    detected_at: datetime = Field(description="When signal was detected")
+
+    @computed_field
+    @property
+    def is_high_confidence(self) -> bool:
+        """True if confidence exceeds 0.75."""
+        return self.confidence > 0.75
+
+    @computed_field
+    @property
+    def potential_profit_pips(self) -> float:
+        """Calculate potential profit in pips (approximate for forex)."""
+        return abs(self.take_profit - self.entry_price)
+
+
+class ScanAllSummaryResponse(BaseModel):
+    """
+    Simplified response for scan-all endpoint with summary mode.
+
+    Reduces data noise by returning only essential signal information.
+    """
+
+    timeframe: str = Field(description="Chart timeframe used for scan")
+    min_confidence: float = Field(description="Minimum confidence threshold used")
+    total_signals: int = Field(description="Total number of signals found")
+    buy_signals: int = Field(description="Number of buy signals")
+    sell_signals: int = Field(description="Number of sell signals")
+    high_confidence_count: int = Field(description="Number of high-confidence signals (>0.75)")
+    signals: list[ScanSummary] = Field(default_factory=list, description="Simplified signal summaries")

@@ -6,7 +6,11 @@
       "Bash(uv add:*)",
       "Bash(timeout:*)",
       "Bash(curl:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(python:*)"
     ]
   }
 }

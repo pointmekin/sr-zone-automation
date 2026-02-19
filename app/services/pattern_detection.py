@@ -36,7 +36,8 @@ class PatternDetectionService:
     def __init__(
         self,
         wick_ratio: float | None = None,
-        sr_service: SRDetectionService | None = None
+        sr_service: SRDetectionService | None = None,
+        sr_profile: str | None = None
     ):
         """
         Initialize pattern detection service.
@@ -44,14 +45,23 @@ class PatternDetectionService:
         Args:
             wick_ratio: Minimum wick-to-body ratio for Big Wick
             sr_service: S/R detection service instance
+            sr_profile: SR detection profile to use (conservative, balanced, aggressive)
         """
         settings = get_settings()
         self.wick_ratio = wick_ratio or settings.wick_ratio
-        self.sr_service = sr_service or SRDetectionService()
+
+        # Use provided SR service or create new one with profile
+        if sr_service:
+            self.sr_service = sr_service
+        else:
+            profile = sr_profile or settings.sr_detection_profile
+            self.sr_service = SRDetectionService(profile=profile)
+
         self.data_service = DataService()
 
         logger.info(
-            f"PatternDetectionService initialized: wick_ratio={self.wick_ratio}"
+            f"PatternDetectionService initialized: wick_ratio={self.wick_ratio}, "
+            f"sr_profile={sr_profile or settings.sr_detection_profile}"
         )
 
     async def detect_big_wick(

@@ -40,12 +40,15 @@ async def detect_support_resistance(
     - **ticker**: Forex pair or commodity (e.g., EURUSD=X, XAUUSD=X)
     - **timeframe**: Chart timeframe (1m, 5m, 15m, 30m, 1h, 4h, 1d)
     - **lookback_bars**: Number of bars to analyze (default: 500)
+    - **sr_detection_profile**: Preset profile (conservative/balanced/aggressive)
 
     Returns a list of S/R zones sorted by strength.
     """
+    profile = request.sr_detection_profile or "default"
     logger.info(
         f"Detecting S/R zones for {request.ticker} "
-        f"{request.timeframe} ({request.lookback_bars} bars)"
+        f"{request.timeframe} ({request.lookback_bars} bars, "
+        f"profile={profile})"
     )
 
     # Fetch market data
@@ -61,8 +64,18 @@ async def detect_support_resistance(
             detail=f"No data available for {request.ticker}"
         )
 
-    # Detect S/R zones with custom sensitivity
-    zones = await sr_service.detect_zones(
+    # Apply profile if specified in request
+    detection_service = sr_service
+    if request.sr_detection_profile:
+        from app.config.constants import SR_DETECTION_PRESETS
+        preset = SR_DETECTION_PRESETS.get(request.sr_detection_profile, {})
+        detection_service = SRDetectionService(
+            profile=request.sr_detection_profile,
+            sensitivity=request.sr_sensitivity or preset.get("sensitivity_atr_multiplier", 0.3)
+        )
+
+    # Detect S/R zones
+    zones = await detection_service.detect_zones(
         market_data,
         sensitivity=request.sr_sensitivity
     )
