@@ -215,7 +215,11 @@ class AnalysisRequest(BaseModel):
         default=None,
         ge=0.01,
         le=0.2,
-        description="S/R zone sensitivity (overrides default)"
+        description="[DEPRECATED] S/R zone sensitivity (overrides default, use sr_detection_profile instead)"
+    )
+    sr_detection_profile: Optional[str] = Field(
+        default=None,
+        description="Detection preset profile: conservative, balanced, aggressive"
     )
 
 

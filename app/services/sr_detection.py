@@ -44,6 +44,7 @@ class SRDetectionService:
         use_atr: bool = True,
         sensitivity_atr_multiplier: Optional[float] = None,
         zone_width_atr_multiplier: Optional[float] = None,
+        profile: Optional[str] = None,
     ):
         """
         Initialize improved S/R detection service.
@@ -55,34 +56,42 @@ class SRDetectionService:
             use_atr: Use ATR-based dynamic thresholds
             sensitivity_atr_multiplier: ATR multiplier for clustering
             zone_width_atr_multiplier: ATR multiplier for zone width
+            profile: Preset profile name (conservative, balanced, aggressive)
         """
         settings = get_settings()
 
-        # Legacy support
-        self.sensitivity = sensitivity or settings.sr_sensitivity
-        self.min_touches = min_touches
-        self.lookback_pivots = lookback_pivots
-        self.fresh_zone_threshold = settings.fresh_zone_threshold
+        # Load preset profile if specified
+        from app.config.constants import SR_DETECTION_PRESETS
+        selected_profile = profile or settings.sr_detection_profile
+        preset = SR_DETECTION_PRESETS.get(selected_profile, SR_DETECTION_PRESETS["balanced"])
 
-        # New improved parameters
-        self.use_atr = use_atr or settings.use_atr_thresholds
-        self.sensitivity_atr = sensitivity_atr_multiplier or settings.sensitivity_atr_multiplier
-        self.zone_width_atr = zone_width_atr_multiplier or settings.zone_width_atr_multiplier
-        self.atr_period = settings.atr_period
-        self.min_pivot_distance = settings.min_pivot_distance_bars
-        self.use_volume = settings.use_volume_confirmation
+        # Legacy support (use preset if not explicitly provided)
+        self.sensitivity = sensitivity or settings.sr_sensitivity
+        self.min_touches = min_touches if min_touches != 2 else preset.get("min_zone_touches", 2)
+        self.lookback_pivots = lookback_pivots if lookback_pivots != 5 else preset.get("min_pivot_lookback", 5)
+        self.fresh_zone_threshold = preset.get("fresh_zone_threshold", 100)
+
+        # New improved parameters - use preset if not explicitly provided
+        self.use_atr = use_atr or preset.get("use_atr_thresholds", True)
+        self.sensitivity_atr = sensitivity_atr_multiplier or preset.get("sensitivity_atr_multiplier", 0.3)
+        self.zone_width_atr = zone_width_atr_multiplier or preset.get("zone_width_atr_multiplier", 0.5)
+        self.atr_period = preset.get("atr_period", 14)
+        self.min_pivot_distance = preset.get("min_pivot_distance_bars", 5)
+        self.use_volume = preset.get("use_volume_confirmation", False)
         self.volume_threshold = settings.volume_confirmation_threshold
-        self.max_zone_age = settings.max_zone_age_bars
-        self.recency_weight = settings.recency_weight
-        self.touch_weight = settings.touch_weight
-        self.round_number_proximity = settings.round_number_proximity
-        self.overlap_threshold = settings.overlap_removal_threshold
-        self.min_strength = settings.min_zone_strength
+        self.max_zone_age = preset.get("max_zone_age_bars", 500)
+        self.recency_weight = preset.get("recency_weight", 0.4)
+        self.touch_weight = preset.get("touch_weight", 0.6)
+        self.round_number_proximity = preset.get("round_number_proximity", 0.001)
+        self.overlap_threshold = preset.get("overlap_removal_threshold", 0.7)
+        self.min_strength = preset.get("min_zone_strength", 0.0)
 
         logger.info(
-            f"SRDetectionService initialized: ATR={self.use_atr}, "
+            f"SRDetectionService initialized: profile={selected_profile}, "
+            f"ATR={self.use_atr}, "
             f"sensitivity_atr={self.sensitivity_atr}, "
-            f"min_touches={min_touches}"
+            f"zone_width_atr={self.zone_width_atr}, "
+            f"min_touches={self.min_touches}"
         )
 
     async def detect_zones(

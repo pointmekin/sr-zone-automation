@@ -102,6 +102,12 @@ class Settings(BaseSettings):
         description="Minimum touches to qualify as a zone"
     )
 
+    # SR Detection Profile
+    sr_detection_profile: str = Field(
+        default="balanced",
+        description="Detection preset profile: conservative, balanced, aggressive, custom"
+    )
+
     # Improved SR Detection Parameters
     use_atr_thresholds: bool = Field(
         default=True,
@@ -133,13 +139,13 @@ class Settings(BaseSettings):
     )
     use_volume_confirmation: bool = Field(
         default=False,
-        description="Require above-average volume for pivot confirmation"
+        description="[DEPRECATED] Require above-average volume for pivot confirmation (not reliable for forex)"
     )
     volume_confirmation_threshold: float = Field(
         default=0.5,
         ge=0.5,
         le=1.5,
-        description="Minimum volume ratio (relative to average) for pivot confirmation"
+        description="[DEPRECATED] Minimum volume ratio (relative to average) for pivot confirmation"
     )
     max_zone_age_bars: int = Field(
         default=500,
