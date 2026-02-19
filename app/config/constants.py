@@ -83,6 +83,21 @@ FRESH_ZONE_THRESHOLD_BARS: Final[int] = 100
 MIN_PIVOT_LOOKBACK: Final[int] = 5
 MIN_ZONE_TOUCHES: Final[int] = 2
 
+# Improved SR Detection Parameters
+USE_ATR_THRESHOLDS: Final[bool] = True
+SENSITIVITY_ATR_MULTIPLIER: Final[float] = 0.3  # 0.3 ATR units for clustering (tighter)
+ZONE_WIDTH_ATR_MULTIPLIER: Final[float] = 0.5  # 0.5 ATR units for zone width (wide buffer)
+ATR_PERIOD: Final[int] = 14
+MIN_PIVOT_DISTANCE_BARS: Final[int] = 5  # Minimum bars between pivots (reduced)
+USE_VOLUME_CONFIRMATION: Final[bool] = False  # Disabled by default
+VOLUME_CONFIRMATION_THRESHOLD: Final[float] = 0.5  # 50% of average volume
+MAX_ZONE_AGE_BARS: Final[int] = 500
+RECENCY_WEIGHT: Final[float] = 0.4
+TOUCH_WEIGHT: Final[float] = 0.6
+ROUND_NUMBER_PROXIMITY: Final[float] = 0.001  # 0.1% for round numbers
+OVERLAP_REMOVAL_THRESHOLD: Final[float] = 0.7  # 70% overlap
+MIN_ZONE_STRENGTH: Final[float] = 0.0  # No minimum by default
+
 # Pattern detection thresholds
 MANUAL_EXIT_BARS: Final[int] = 5
 THREE_PULSE_TOLERANCE: Final[int] = 5

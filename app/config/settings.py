@@ -7,7 +7,7 @@ by setting actual environment variables.
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, SecretStr, ConfigDict
-from typing import List
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
@@ -102,6 +102,82 @@ class Settings(BaseSettings):
         description="Minimum touches to qualify as a zone"
     )
 
+    # Improved SR Detection Parameters
+    use_atr_thresholds: bool = Field(
+        default=True,
+        description="Use ATR-based dynamic thresholds instead of fixed percentage"
+    )
+    sensitivity_atr_multiplier: float = Field(
+        default=0.3,
+        ge=0.1,
+        le=2.0,
+        description="ATR multiplier for clustering threshold (0.3 = 0.3 ATR units)"
+    )
+    zone_width_atr_multiplier: float = Field(
+        default=0.5,
+        ge=0.05,
+        le=1.0,
+        description="ATR multiplier for zone width (0.5 = 0.5 ATR units)"
+    )
+    atr_period: int = Field(
+        default=14,
+        ge=5,
+        le=50,
+        description="Period for ATR calculation"
+    )
+    min_pivot_distance_bars: int = Field(
+        default=5,
+        ge=3,
+        le=50,
+        description="Minimum bars between pivot points to prevent crowding"
+    )
+    use_volume_confirmation: bool = Field(
+        default=False,
+        description="Require above-average volume for pivot confirmation"
+    )
+    volume_confirmation_threshold: float = Field(
+        default=0.5,
+        ge=0.5,
+        le=1.5,
+        description="Minimum volume ratio (relative to average) for pivot confirmation"
+    )
+    max_zone_age_bars: int = Field(
+        default=500,
+        ge=100,
+        le=1000,
+        description="Maximum age of zone in bars before expiration"
+    )
+    recency_weight: float = Field(
+        default=0.4,
+        ge=0.0,
+        le=1.0,
+        description="Weight for recency factor in strength calculation"
+    )
+    touch_weight: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description="Weight for touch count factor in strength calculation"
+    )
+    round_number_proximity: float = Field(
+        default=0.001,
+        ge=0.0001,
+        le=0.01,
+        description="Proimity threshold for psychological round numbers (0.001 = 0.1%)"
+    )
+    overlap_removal_threshold: float = Field(
+        default=0.7,
+        ge=0.5,
+        le=0.9,
+        description="Overlap ratio threshold for zone removal (0.7 = 70%)"
+    )
+    min_zone_strength: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum strength threshold for zone filtering"
+    )
+
     # Pattern Detection Parameters
     manual_exit_bars: int = Field(
         default=5,
@@ -169,7 +245,7 @@ class Settings(BaseSettings):
 
 
 # Global settings instance
-_settings: Settings | None = None
+_settings: Optional[Settings] = None
 
 
 def get_settings() -> Settings:

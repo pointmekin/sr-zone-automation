@@ -5,7 +5,7 @@ Fetches OHLCV data for Forex pairs and commodities with caching support.
 """
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Union
 import asyncio
 from pathlib import Path
 
@@ -24,7 +24,7 @@ class DataService:
     Provides caching, async support, and automatic DataFrame to OHLCV conversion.
     """
 
-    def __init__(self, cache_dir: str | None = None):
+    def __init__(self, cache_dir: Optional[str] = None):
         """
         Initialize the data service.
 

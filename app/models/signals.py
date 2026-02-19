@@ -47,25 +47,54 @@ class SRZone(BaseModel):
         description="When zone was detected"
     )
 
-    # Zone width parameter (half-width on each side)
-    zone_width_percent: float = Field(
-        default=0.005,
-        ge=0.001,
-        le=0.02,
-        description="Zone width as percentage (0.005 = 0.5% each side)"
+    # Price range is set by the detection service based on ATR or fixed percentage
+    price_range: tuple[float, float] = Field(
+        default=(0.0, 0.0),
+        description="Price range of the zone (lower_bound, upper_bound)"
     )
 
-    @computed_field
-    @property
-    def price_range(self) -> tuple[float, float]:
-        """Price range of the zone (lower_bound, upper_bound)."""
-        half_width = self.level * self.zone_width_percent
-        if self.zone_type == ZoneType.SUPPORT:
-            # For support, zone extends below the level
-            return (self.level - half_width, self.level + half_width * 0.5)
-        else:
-            # For resistance, zone extends above the level
-            return (self.level - half_width * 0.5, self.level + half_width)
+    # Improved fields for enhanced zone analysis
+    first_touch_date: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp of first touch (zone origin)"
+    )
+    pivot_indices: list[int] = Field(
+        default_factory=list,
+        description="Indices of candles that formed this zone"
+    )
+    volume_at_zone: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Average volume at zone touches"
+    )
+    round_number_factor: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Proximity to psychological round number (0-1)"
+    )
+    time_span_bars: int = Field(
+        default=0,
+        ge=0,
+        description="Time span from first to last touch in bars"
+    )
+    last_touch_bars_ago: int = Field(
+        default=0,
+        ge=0,
+        description="Number of bars since last touch"
+    )
+    touch_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Touch count component of strength"
+    )
+    recency_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Recency component of strength"
+    )
 
     @computed_field
     @property
