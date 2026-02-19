@@ -360,3 +360,52 @@ class SignalListResponse(BaseModel):
     def has_signals(self) -> bool:
         """True if there are any signals."""
         return self.total_count > 0
+
+
+class ScanSummary(BaseModel):
+    """
+    Simplified summary of a trading signal for scan results.
+
+    Contains only the most relevant information to reduce noise.
+    """
+
+    ticker: str = Field(description="Ticker symbol")
+    timeframe: str = Field(description="Chart timeframe")
+    signal_type: SignalType = Field(description="Type of signal")
+    direction: str = Field(description="Trade direction (buy/sell)")
+    entry_price: float = Field(description="Suggested entry price")
+    stop_loss: float = Field(description="Suggested stop loss level")
+    take_profit: float = Field(description="Suggested take profit level")
+    risk_reward: float = Field(description="Risk-reward ratio")
+    confidence: float = Field(description="Signal confidence (0-1)")
+    zone_level: float = Field(description="Associated S/R zone level")
+    zone_strength: float = Field(description="S/R zone strength (0-1)")
+    detected_at: datetime = Field(description="When signal was detected")
+
+    @computed_field
+    @property
+    def is_high_confidence(self) -> bool:
+        """True if confidence exceeds 0.75."""
+        return self.confidence > 0.75
+
+    @computed_field
+    @property
+    def potential_profit_pips(self) -> float:
+        """Calculate potential profit in pips (approximate for forex)."""
+        return abs(self.take_profit - self.entry_price)
+
+
+class ScanAllSummaryResponse(BaseModel):
+    """
+    Simplified response for scan-all endpoint with summary mode.
+
+    Reduces data noise by returning only essential signal information.
+    """
+
+    timeframe: str = Field(description="Chart timeframe used for scan")
+    min_confidence: float = Field(description="Minimum confidence threshold used")
+    total_signals: int = Field(description="Total number of signals found")
+    buy_signals: int = Field(description="Number of buy signals")
+    sell_signals: int = Field(description="Number of sell signals")
+    high_confidence_count: int = Field(description="Number of high-confidence signals (>0.75)")
+    signals: list[ScanSummary] = Field(default_factory=list, description="Simplified signal summaries")

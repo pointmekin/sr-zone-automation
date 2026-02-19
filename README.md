@@ -1272,6 +1272,142 @@ From the Nick Shawn framework:
 
 ## API Documentation
 
+### Interactive Documentation
+
+- **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+- **OpenAPI JSON**: [http://localhost:8000/api/v1/openapi.json](http://localhost:8000/api/v1/openapi.json)
+
+### Key Endpoints
+
+#### Scan All Tickers (Recommended)
+
+**Endpoint:** `GET /api/v1/signals/scan-all`
+
+Scans all configured forex pairs for **active** A+ setups only. Returns maximum 1 signal per ticker.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `timeframe` | string | "1h" | Chart timeframe (1m, 5m, 15m, 30m, 1h, 4h, 1d) |
+| `min_confidence` | float | 0.7 | Minimum confidence (0.5-1.0) |
+| `summary` | boolean | true | Return simplified data only |
+
+**Active Signal Criteria:**
+- Price is currently **within** the SR zone bounds
+- OR price is **near** the zone (within 0.15%)
+- OR setup was detected **recently** (within 1 hour)
+
+**Response (summary mode):**
+```json
+{
+  "timeframe": "1h",
+  "min_confidence": 0.7,
+  "total_signals": 2,
+  "buy_signals": 1,
+  "sell_signals": 1,
+  "high_confidence_count": 1,
+  "signals": [
+    {
+      "ticker": "EURUSD=X",
+      "timeframe": "1h",
+      "signal_type": "a_plus_buy",
+      "direction": "buy",
+      "entry_price": 1.0852,
+      "stop_loss": 1.0820,
+      "take_profit": 1.0910,
+      "risk_reward": 1.5,
+      "confidence": 0.78,
+      "zone_level": 1.0850,
+      "zone_strength": 0.82,
+      "detected_at": "2025-02-20T10:30:00Z",
+      "is_high_confidence": true,
+      "potential_profit_pips": 58.0
+    }
+  ]
+}
+```
+
+**Example Usage:**
+```bash
+# Scan with defaults (1h, summary mode)
+curl -X GET "http://localhost:8000/api/v1/signals/scan-all" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Scan 4h timeframe for end-of-day analysis
+curl -X GET "http://localhost:8000/api/v1/signals/scan-all?timeframe=4h" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Scan with higher confidence (only best setups)
+curl -X GET "http://localhost:8000/api/v1/signals/scan-all?min_confidence=0.8" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### Detect Support/Resistance Zones
+
+**Endpoint:** `POST /api/v1/analysis/zones`
+
+Detect SR zones for a specific ticker with optional profile selection.
+
+**Request Body:**
+```json
+{
+  "ticker": "EURUSD=X",
+  "timeframe": "1h",
+  "sr_detection_profile": "conservative"
+}
+```
+
+**Response:**
+```json
+[
+  {
+    "level": 1.0850,
+    "zone_type": "support",
+    "strength": 0.82,
+    "touches": 3,
+    "is_fresh": true,
+    "price_range": [1.0820, 1.0880],
+    "zone_width": 0.0060
+  }
+]
+```
+
+#### Generate Chart with Zones
+
+**Endpoint:** `GET /api/v1/charts/generate`
+
+Generate an HTML chart with OHLCV candles and detected SR zones.
+
+**Query Parameters:**
+- `ticker`: Ticker symbol (required)
+- `timeframe`: Chart timeframe (default: "1h")
+
+**Response:** HTML string with embedded Plotly chart
+
+### Periodic Background Scanning
+
+The system automatically scans for A+ setups every **15 minutes** using:
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| **Timeframe** | 1h | Swing trading quality, less noise |
+| **SR Profile** | conservative | Wider zones (56 pips), 3+ touches, stronger zones |
+| **Min Confidence** | 0.75 | High quality signals only |
+| **Scan Interval** | 15 minutes | Frequent enough to catch new setups |
+
+**Expected Signal Frequency:** 1-3 high-quality signals per day across all pairs.
+
+**Configuration (via .env):**
+```bash
+SCAN_TIMEFRAME=1h
+SCAN_MIN_CONFIDENCE=0.75
+SCAN_SR_PROFILE=conservative
+SCAN_INTERVAL_MINUTES=15
+```
+
+## API Documentation
+
 - Interactive Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs)
 - ReDoc: [http://localhost:8000/redoc](http://localhost:8000/redoc)
 - OpenAPI JSON: [http://localhost:8000/api/v1/openapi.json](http://localhost:8000/api/v1/openapi.json)

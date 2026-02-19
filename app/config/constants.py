@@ -175,6 +175,13 @@ SR_DETECTION_PRESETS: Final[dict[str, dict]] = {
     },
 }
 
+# Periodic Scan Configuration
+# Best configuration for hourly trade setup notifications
+SCAN_TIMEFRAME: Final[str] = "1h"  # 1-hour timeframe for swing trading setups
+SCAN_MIN_CONFIDENCE: Final[float] = 0.75  # 75% minimum confidence for auto-alerts
+SCAN_SR_PROFILE: Final[str] = "conservative"  # Conservative profile for higher quality zones
+SCAN_INTERVAL_MINUTES: Final[int] = 15  # Scan every 15 minutes
+
 # Forex pairs metadata
 FOREX_PAIRS: Final[dict[str, dict]] = {
     "EURUSD=X": {

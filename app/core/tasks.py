@@ -52,9 +52,17 @@ class BackgroundTaskManager:
         self._recent_alerts_cache: set[str] = set()
         self._cache_max_size = 1000
 
+        # Create pattern service with scan profile for periodic scans
+        from app.services.pattern_detection import PatternDetectionService
+        self.scan_pattern_service = PatternDetectionService(
+            sr_profile=self.settings.scan_sr_profile  # Use configured profile for scans
+        )
+
         logger.info(
             f"BackgroundTaskManager initialized: "
-            f"scan_interval={self.settings.scan_interval_minutes}min"
+            f"scan_interval={self.settings.scan_interval_minutes}min, "
+            f"scan_timeframe={self.settings.scan_timeframe}, "
+            f"scan_profile={self.settings.scan_sr_profile}"
         )
 
     def _get_setup_key(self, setup) -> str:
@@ -183,10 +191,10 @@ class BackgroundTaskManager:
                             break
 
                         try:
-                            setups = await self.pattern_service.detect_a_plus_setups(
+                            setups = await self.scan_pattern_service.detect_a_plus_setups(
                                 ticker=ticker,
-                                timeframe="15m",
-                                min_confidence=0.75  # Higher threshold for auto-alerts
+                                timeframe=self.settings.scan_timeframe,  # Use configured timeframe (default: 1h)
+                                min_confidence=self.settings.scan_min_confidence  # Use configured threshold (default: 0.75)
                             )
 
                             if setups:
@@ -253,8 +261,8 @@ class BackgroundTaskManager:
                 try:
                     setups = await self.pattern_service.detect_a_plus_setups(
                         ticker=ticker,
-                        timeframe="15m",
-                        min_confidence=0.7
+                        timeframe=self.settings.scan_timeframe,  # Use configured timeframe (default: 1h)
+                        min_confidence=self.settings.scan_min_confidence  # Use configured threshold
                     )
 
                     if setups:

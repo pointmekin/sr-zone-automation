@@ -236,6 +236,20 @@ class Settings(BaseSettings):
         le=60,
         description="Interval between automatic signal scans (minutes)"
     )
+    scan_timeframe: str = Field(
+        default="1h",
+        description="Timeframe for periodic signal scans (1h recommended for swing trading)"
+    )
+    scan_min_confidence: float = Field(
+        default=0.75,
+        ge=0.5,
+        le=1.0,
+        description="Minimum confidence for auto-alerts (higher = fewer, higher quality signals)"
+    )
+    scan_sr_profile: str = Field(
+        default="conservative",
+        description="SR detection profile for periodic scans (conservative recommended for 1h timeframe)"
+    )
 
     # Logging
     log_level: str = Field(
