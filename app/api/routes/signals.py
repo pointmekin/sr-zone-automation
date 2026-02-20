@@ -261,8 +261,10 @@ async def _process_single_ticker_scan(
                 setup_age_minutes = (latest_time - setup.detected_at).total_seconds() / 60
                 is_recent = setup_age_minutes <= 60
 
-                # Check if price is near zone (within 0.15%)
-                price_near_zone = abs(latest_close - zone.level) / zone.level <= 0.0015
+                # Check if price is near zone (proportional to zone width)
+                # Use 1.5x zone half-width as "near" threshold for tradeable setups
+                zone_half_width = (zone_upper - zone_lower) / 2
+                price_near_zone = abs(latest_close - zone.level) <= zone_half_width * 1.5
 
                 # Include if price is at/near zone OR setup is very recent
                 if price_in_zone or price_near_zone or is_recent:

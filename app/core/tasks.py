@@ -5,12 +5,14 @@ Uses asyncio for background scanning and Discord alerts.
 """
 
 import asyncio
+from datetime import timedelta
 from typing import Optional, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.pattern_detection import PatternDetectionService
 from app.services.discord_service import DiscordBotService
+from app.services.data_service import DataService
 from app.config.settings import get_settings
 from app.db.session import get_db
 from app.db.models.sent_alert import SentAlert
@@ -58,6 +60,9 @@ class BackgroundTaskManager:
             sr_profile=self.settings.scan_sr_profile  # Use configured profile for scans
         )
 
+        # Data service for fetching current price
+        self.data_service = DataService()
+
         logger.info(
             f"BackgroundTaskManager initialized: "
             f"scan_interval={self.settings.scan_interval_minutes}min, "
@@ -69,50 +74,71 @@ class BackgroundTaskManager:
         """
         Generate a unique key for a setup to track sent alerts.
 
+        Uses zone level (rounded) instead of candle timestamp to allow
+        re-alerts when price returns to test the same zone.
+
         Args:
             setup: SignalResponse setup
 
         Returns:
-            Unique string key for this setup
+            Unique string key for this setup (zone-based)
         """
+        # Round zone level to 5 decimal places for grouping (~1 pip for EURUSD)
+        zone_level_rounded = round(setup.big_wick.sr_zone.level, 5)
         return (
             f"{setup.big_wick.ticker}|"
             f"{setup.big_wick.timeframe}|"
-            f"{setup.big_wick.timestamp.isoformat()}|"
-            f"{setup.big_wick.entry_price:.5f}|"
+            f"{zone_level_rounded}|"
             f"{'buy' if setup.is_buy else 'sell'}"
         )
 
     async def _is_alert_sent(self, db: AsyncSession, setup) -> bool:
         """
-        Check if an alert has already been sent for this setup.
+        Check if an alert has already been sent for this setup recently.
 
         Checks both the in-memory cache (fast path) and database (persistent).
+        Alerts expire after 4 hours to allow re-alerts on zone re-tests.
 
         Args:
             db: Database session
             setup: SignalResponse setup
 
         Returns:
-            True if alert was already sent
+            True if alert was already sent (within last 4 hours)
         """
         # Fast path: check in-memory cache first
         key = self._get_setup_key(setup)
         if key in self._recent_alerts_cache:
             return True
 
-        # Slow path: check database
-        components = SentAlert.create_key_components(setup)
+        # Slow path: check database (with 4-hour expiry)
+        # Since we now use zone-based keys, we need to query by zone level
+        zone_level_rounded = round(setup.big_wick.sr_zone.level, 5)
+
+        four_hours_ago = datetime.utcnow().replace(tzinfo=None) - timedelta(hours=4)
+
+        # Query for recent alerts at this zone level
         result = await db.execute(
             select(SentAlert).where(
-                SentAlert.ticker == components['ticker'],
-                SentAlert.timeframe == components['timeframe'],
-                SentAlert.candle_timestamp == components['candle_timestamp'],
-                SentAlert.entry_price == components['entry_price'],
-                SentAlert.direction == components['direction']
-            )
+                SentAlert.ticker == setup.big_wick.ticker,
+                SentAlert.timeframe == setup.big_wick.timeframe,
+                SentAlert.direction == ('buy' if setup.is_buy else 'sell'),
+                SentAlert.created_at >= four_hours_ago
+            ).order_by(SentAlert.created_at.desc())
         )
-        return result.first() is not None
+        recent_alerts = result.all()
+
+        # Check if any recent alert is near the same zone level (within 0.0005)
+        for alert in recent_alerts:
+            # Parse entry_price to get zone level approximation
+            try:
+                alert_entry_price = float(alert.entry_price)
+                if abs(alert_entry_price - zone_level_rounded) <= 0.0005:
+                    return True
+            except (ValueError, TypeError):
+                continue
+
+        return False
 
     async def _mark_alert_sent(self, db: AsyncSession, setup):
         """
@@ -200,9 +226,46 @@ class BackgroundTaskManager:
                             if setups:
                                 logger.info(f"Found {len(setups)} A+ setup(s) for {ticker}")
 
+                                # Filter by current price proximity (only alert if price is tradeable)
+                                market_data = await self.data_service.fetch_data(
+                                    ticker=ticker,
+                                    timeframe=self.settings.scan_timeframe,
+                                    lookback_bars=100
+                                )
+
+                                if not market_data.data:
+                                    logger.warning(f"No current data available for {ticker}")
+                                    continue
+
+                                latest_close = market_data.data[-1].close
+
+                                # Filter to setups where price is currently at/near zone
+                                price_filtered_setups = []
+                                for setup in setups:
+                                    zone = setup.big_wick.sr_zone
+                                    zone_lower, zone_upper = zone.price_range
+                                    zone_half_width = (zone_upper - zone_lower) / 2
+
+                                    # Check if price is in zone or near zone (1.5x half-width)
+                                    price_in_zone = zone_lower <= latest_close <= zone_upper
+                                    price_near = abs(latest_close - zone.level) <= zone_half_width * 1.5
+
+                                    if price_in_zone or price_near:
+                                        price_filtered_setups.append(setup)
+                                    else:
+                                        distance_pips = abs(latest_close - zone.level) * 10000
+                                        logger.debug(
+                                            f"Setup for {ticker} filtered out: price {latest_close:.5f} "
+                                            f"is {distance_pips:.1f} pips from zone {zone.level:.5f}"
+                                        )
+
+                                logger.info(
+                                    f"Price-filtered to {len(price_filtered_setups)} tradeable setup(s) for {ticker}"
+                                )
+
                                 # Filter out already-sent setups
                                 new_setups = []
-                                for setup in setups:
+                                for setup in price_filtered_setups:
                                     if not await self._is_alert_sent(db, setup):
                                         new_setups.append(setup)
 
@@ -247,6 +310,8 @@ class BackgroundTaskManager:
         """
         Perform a one-time scan of all tickers.
 
+        Only returns setups where price is currently at or near the SR zone.
+
         Returns:
             Dictionary with scan results
         """
@@ -266,21 +331,50 @@ class BackgroundTaskManager:
                     )
 
                     if setups:
+                        # Filter by current price proximity
+                        market_data = await self.data_service.fetch_data(
+                            ticker=ticker,
+                            timeframe=self.settings.scan_timeframe,
+                            lookback_bars=100
+                        )
+
+                        price_filtered_setups = []
+                        if market_data.data:
+                            latest_close = market_data.data[-1].close
+                            for setup in setups:
+                                zone = setup.big_wick.sr_zone
+                                zone_lower, zone_upper = zone.price_range
+                                zone_half_width = (zone_upper - zone_lower) / 2
+
+                                price_in_zone = zone_lower <= latest_close <= zone_upper
+                                price_near = abs(latest_close - zone.level) <= zone_half_width * 1.5
+
+                                if price_in_zone or price_near:
+                                    price_filtered_setups.append(setup)
+
+                            logger.debug(
+                                f"{ticker}: {len(setups)} total setups, "
+                                f"{len(price_filtered_setups)} with price at/near zone"
+                            )
+                        else:
+                            logger.warning(f"No current data for {ticker}")
+                            price_filtered_setups = []
+
                         # Filter out already-sent setups
                         new_setups = []
                         old_setups = []
-                        for setup in setups:
+                        for setup in price_filtered_setups:
                             if await self._is_alert_sent(db, setup):
                                 old_setups.append(setup)
                             else:
                                 new_setups.append(setup)
 
                         results[ticker] = {
-                            "count": len(setups),
+                            "count": len(price_filtered_setups),
                             "new_count": len(new_setups),
-                            "buy_signals": len([s for s in setups if s.is_buy]),
-                            "sell_signals": len([s for s in setups if s.is_sell]),
-                            "setups": setups
+                            "buy_signals": len([s for s in price_filtered_setups if s.is_buy]),
+                            "sell_signals": len([s for s in price_filtered_setups if s.is_sell]),
+                            "setups": price_filtered_setups
                         }
                         total_setups += len(new_setups)
 

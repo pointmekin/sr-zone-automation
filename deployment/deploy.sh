@@ -96,7 +96,7 @@ health_check() {
     # Wait for container to start
     sleep 10
 
-    if curl -f http://localhost:8000/api/v1/health > /dev/null 2>&1; then
+    if curl -f http://localhost:8100/api/v1/health > /dev/null 2>&1; then
         log_info "Health check passed!"
         return 0
     else
@@ -130,8 +130,8 @@ main() {
     # Run health check
     if health_check; then
         log_info "Deployment completed successfully!"
-        log_info "API is available at: http://localhost:8000"
-        log_info "Documentation: http://localhost:8000/docs"
+        log_info "API is available at: http://localhost:8100"
+        log_info "Documentation: http://localhost:8100/docs"
 
         # Optional: show logs
         read -p "View logs? (y/n) " -n 1 -r
