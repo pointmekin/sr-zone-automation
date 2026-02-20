@@ -157,6 +157,86 @@ class PatternDetectionService:
 
         return signals
 
+    async def _detect_big_wick_with_data(
+        self,
+        market_data: MarketData,
+        sr_zones: list,
+        ticker: str,
+        timeframe: str
+    ) -> list[BigWickSignal]:
+        """
+        Detect Big Wick patterns using pre-fetched data and SR zones.
+
+        This helper method avoids duplicate data fetching by accepting
+        pre-fetched market data and detected SR zones.
+
+        Args:
+            market_data: Pre-fetched market data
+            sr_zones: Pre-detected SR zones
+            ticker: Ticker symbol
+            timeframe: Chart timeframe
+
+        Returns:
+            List of BigWickSignal objects
+        """
+        signals = []
+        candles = market_data.data
+
+        for i, candle in enumerate(candles):
+            # Check if this is a Big Wick candle
+            if not self._is_big_wick(candle, candles, i):
+                continue
+
+            # Check if it's near an S/R zone
+            sr_zone = self._find_nearby_sr_zone(candle, sr_zones)
+            if not sr_zone:
+                continue
+
+            # Determine signal type and calculate entry/SL/TP
+            wick_to_body = candle.total_wick / candle.body_size if candle.body_size > 0 else 0
+
+            if candle.is_bullish:
+                signal_type = SignalType.BIG_WICK_BULLISH
+                entry_price = candle.close
+                stop_loss = candle.low  # Below the wick
+                risk = abs(entry_price - stop_loss)
+                take_profit = entry_price + risk  # 1:1 RR
+            else:
+                signal_type = SignalType.BIG_WICK_BEARISH
+                entry_price = candle.close
+                stop_loss = candle.high  # Above the wick
+                risk = abs(entry_price - stop_loss)
+                take_profit = entry_price - risk  # 1:1 RR
+
+            # Calculate risk-reward
+            rr = abs(take_profit - entry_price) / abs(entry_price - stop_loss)
+
+            signal = BigWickSignal(
+                ticker=ticker,
+                timeframe=timeframe,
+                timestamp=candle.timestamp,
+                signal_type=signal_type,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_reward=rr,
+                wick_ratio=wick_to_body,
+                sr_zone=sr_zone,
+                confidence=self._calculate_big_wick_confidence(
+                    candle, candles, i, sr_zone
+                ),
+                candle_open=candle.open,
+                candle_high=candle.high,
+                candle_low=candle.low,
+                candle_close=candle.close,
+                candle_volume=candle.volume
+            )
+            signals.append(signal)
+
+        logger.info(f"Found {len(signals)} Big Wick signals for {ticker} (using shared data)")
+
+        return signals
+
     async def detect_three_pulse(
         self,
         ticker: str,
@@ -232,6 +312,67 @@ class PatternDetectionService:
 
         return signals
 
+    async def _detect_three_pulse_with_data(
+        self,
+        market_data: MarketData,
+        sr_zones: list,
+        ticker: str,
+        timeframe: str
+    ) -> list[ThreePulseSignal]:
+        """
+        Detect Three Pulse patterns using pre-fetched data and SR zones.
+
+        This helper method avoids duplicate data fetching by accepting
+        pre-fetched market data and detected SR zones.
+
+        Args:
+            market_data: Pre-fetched market data
+            sr_zones: Pre-detected SR zones
+            ticker: Ticker symbol
+            timeframe: Chart timeframe
+
+        Returns:
+            List of ThreePulseSignal objects
+        """
+        signals = []
+        pulse_patterns = self._find_three_pulse_sequences(market_data)
+
+        for pattern in pulse_patterns:
+            # Check if exhaustion point is near S/R zone
+            sr_zone = self._find_nearby_sr_zone_by_price(
+                pattern['exhaustion_price'],
+                sr_zones
+            )
+
+            if not sr_zone:
+                continue
+
+            signal_type = (
+                SignalType.THREE_PULSE_BULLISH
+                if pattern['direction'] == 'bullish'
+                else SignalType.THREE_PULSE_BEARISH
+            )
+
+            signal = ThreePulseSignal(
+                ticker=ticker,
+                timeframe=timeframe,
+                start_time=pattern['start_time'],
+                end_time=pattern['end_time'],
+                signal_type=signal_type,
+                pulse_count=len(pattern['pulses']),
+                pulses=pattern['pulses'],
+                exhaustion_point=pattern['exhaustion_price'],
+                sr_zone=sr_zone,
+                confidence=self._calculate_pulse_confidence(pattern, sr_zone),
+                consolidation_start=pattern.get('consolidation_start'),
+                breakout_time=pattern.get('breakout_time')
+            )
+            signals.append(signal)
+
+        logger.info(f"Found {len(signals)} Three Pulse patterns for {ticker} (using shared data)")
+
+        return signals
+
     async def detect_a_plus_setups(
         self,
         ticker: str,
@@ -244,6 +385,9 @@ class PatternDetectionService:
 
         This is the complete Naked Forex setup according to Nick Shawn.
 
+        OPTIMIZATION: Fetches data once and shares across pattern detectors
+        to eliminate duplicate API calls and SR zone calculations.
+
         Args:
             ticker: Ticker symbol
             timeframe: Chart timeframe
@@ -255,9 +399,29 @@ class PatternDetectionService:
         """
         logger.info(f"Detecting A+ setups for {ticker} {timeframe}")
 
-        # Get both signal types
-        big_wicks = await self.detect_big_wick(ticker, timeframe, lookback_bars)
-        three_pulses = await self.detect_three_pulse(ticker, timeframe, lookback_bars)
+        # Fetch data ONCE (eliminates duplicate fetches)
+        market_data = await self.data_service.fetch_shared_data(
+            ticker=ticker,
+            timeframe=timeframe,
+            max_bars=lookback_bars
+        )
+
+        # Detect SR zones ONCE (eliminates duplicate calculations)
+        sr_zones = await self.sr_service.detect_zones(market_data)
+
+        # Detect patterns using shared data and zones
+        big_wicks = await self._detect_big_wick_with_data(
+            market_data=market_data,
+            sr_zones=sr_zones,
+            ticker=ticker,
+            timeframe=timeframe
+        )
+        three_pulses = await self._detect_three_pulse_with_data(
+            market_data=market_data,
+            sr_zones=sr_zones,
+            ticker=ticker,
+            timeframe=timeframe
+        )
 
         # Find matches where Big Wick occurs at Three Pulse exhaustion
         a_plus_setups = []

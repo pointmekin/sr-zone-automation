@@ -276,3 +276,30 @@ class DataService:
                 market_data_dict[ticker] = result
 
         return market_data_dict
+
+    async def fetch_shared_data(
+        self,
+        ticker: str,
+        timeframe: str = "15m",
+        max_bars: int = 500
+    ) -> MarketData:
+        """
+        Fetch data once for multiple consumers to avoid duplicate fetches.
+
+        This method always fetches the maximum bars needed so the data
+        can be shared across different pattern detection methods.
+
+        Args:
+            ticker: Ticker symbol
+            timeframe: Chart timeframe
+            max_bars: Maximum bars needed by any consumer
+
+        Returns:
+            MarketData with max_bars data (uses cache if available)
+        """
+        return await self.fetch_data(
+            ticker=ticker,
+            timeframe=timeframe,
+            lookback_bars=max_bars,
+            use_cache=True
+        )
