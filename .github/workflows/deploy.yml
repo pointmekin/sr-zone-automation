@@ -40,7 +40,7 @@ jobs:
             sleep 30
 
             # Health check
-            if curl -f http://localhost:8000/api/v1/health; then
+            if curl -f http://localhost:8100/api/v1/health; then
               echo "Deployment successful!"
             else
               echo "Health check failed, rolling back..."
