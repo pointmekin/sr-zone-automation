@@ -5,6 +5,7 @@ Uses pivot point detection and clustering algorithms with ATR-based thresholds,
 volume confirmation, psychological level detection, and advanced filtering.
 """
 
+import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, List, Tuple
 
@@ -16,6 +17,12 @@ from app.models.market import MarketData, OHLCV
 from app.models.signals import SRZone, ZoneType
 from app.config.settings import get_settings
 from loguru import logger
+
+
+# Type hint for optional cache service
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.services.cache_service import SRZoneCache
 
 
 class SRDetectionService:
@@ -45,6 +52,8 @@ class SRDetectionService:
         sensitivity_atr_multiplier: Optional[float] = None,
         zone_width_atr_multiplier: Optional[float] = None,
         profile: Optional[str] = None,
+        cache_service: Optional['SRZoneCache'] = None,
+        enable_cache: bool = True,
     ):
         """
         Initialize improved S/R detection service.
@@ -86,6 +95,20 @@ class SRDetectionService:
         self.overlap_threshold = preset.get("overlap_removal_threshold", 0.7)
         self.min_strength = preset.get("min_zone_strength", 0.0)
 
+        # Cache support
+        self.enable_cache = enable_cache
+        if cache_service is not None:
+            self.cache = cache_service
+        elif enable_cache:
+            # Import here to avoid circular dependency
+            from app.services.cache_service import SRZoneCache
+            self.cache = SRZoneCache(
+                max_size=settings.cache_max_size_sr_zones if hasattr(settings, 'cache_max_size_sr_zones') else 100,
+                default_ttl_seconds=3600
+            )
+        else:
+            self.cache = None
+
         logger.info(
             f"SRDetectionService initialized: profile={selected_profile}, "
             f"ATR={self.use_atr}, "
@@ -114,6 +137,26 @@ class SRDetectionService:
         if not data.data:
             logger.warning("No data available for S/R detection")
             return []
+
+        # Try cache first
+        if self.enable_cache and self.cache:
+            settings = get_settings()
+            profile_name = settings.sr_detection_profile
+            data_version = self._generate_data_fingerprint(data)
+            cached_zones = self.cache.get(
+                ticker=data.ticker,
+                timeframe=str(data.timeframe),
+                profile=profile_name,
+                data_version=data_version
+            )
+            if cached_zones is not None:
+                logger.info(
+                    f"Using cached SR zones for {data.ticker} "
+                    f"({len(cached_zones)} zones)"
+                )
+                # Filter by min_strength
+                strength_threshold = min_strength if min_strength > 0 else self.min_strength
+                return [z for z in cached_zones if z.strength >= strength_threshold]
 
         # Use provided min_strength or instance default
         strength_threshold = min_strength if min_strength > 0 else self.min_strength
@@ -165,6 +208,26 @@ class SRDetectionService:
             f"Detected {len(filtered_zones)} S/R zones "
             f"(min_strength={strength_threshold:.2f})"
         )
+
+        # Cache the results
+        if self.enable_cache and self.cache:
+            settings = get_settings()
+            profile_name = settings.sr_detection_profile
+            data_version = self._generate_data_fingerprint(data)
+            ttl_seconds = self._calculate_ttl(str(data.timeframe))
+
+            self.cache.set(
+                ticker=data.ticker,
+                timeframe=str(data.timeframe),
+                profile=profile_name,
+                zones=filtered_zones,
+                ttl_seconds=ttl_seconds,
+                data_version=data_version
+            )
+            logger.info(
+                f"Cached {len(filtered_zones)} SR zones for {data.ticker} "
+                f"(TTL: {ttl_seconds}s)"
+            )
 
         return filtered_zones
 
@@ -768,3 +831,34 @@ class SRDetectionService:
                 return zone
 
         return None
+
+    def _generate_data_fingerprint(self, data: MarketData) -> str:
+        """
+        Generate fingerprint of market data for cache invalidation.
+
+        Uses last candle timestamp and close price to detect new data.
+        """
+        if not data.data:
+            return "empty"
+
+        last_candle = data.data[-1]
+        fingerprint = f"{last_candle.timestamp.isoformat()}_{last_candle.close:.6f}_{last_candle.volume:.2f}"
+        return hashlib.sha256(fingerprint.encode()).hexdigest()[:16]
+
+    def _calculate_ttl(self, timeframe: str) -> int:
+        """
+        Calculate cache TTL based on timeframe.
+
+        Longer timeframes = longer TTL (data changes less frequently).
+        """
+        ttl_map = {
+            "1m": 300,      # 5 minutes
+            "5m": 900,      # 15 minutes
+            "15m": 1800,    # 30 minutes
+            "30m": 3600,    # 1 hour
+            "1h": 7200,     # 2 hours
+            "4h": 14400,    # 4 hours
+            "1d": 86400,    # 1 day
+        }
+        return ttl_map.get(timeframe, 3600)  # Default 1 hour
+
