@@ -85,8 +85,8 @@ ufw allow 22/tcp
 # Allow HTTP
 ufw allow 80/tcp
 
-# Allow custom port (8000) if needed
-ufw allow 8000/tcp
+# Allow custom port (8100) if needed
+ufw allow 8100/tcp
 
 # Enable firewall
 ufw enable
@@ -197,7 +197,7 @@ docker-compose exec finance-automation python scripts/init_db.py
 docker-compose ps
 
 # Test health endpoint
-curl http://localhost:8000/api/v1/health
+curl http://localhost:8100/api/v1/health
 
 # Check background tasks
 docker-compose logs | grep "Background scanning started"
@@ -314,7 +314,7 @@ docker-compose up -d
 docker inspect --format='{{.State.Health.Status}}' finance-automation-app
 
 # API health endpoint
-curl http://localhost:8000/api/v1/health
+curl http://localhost:8100/api/v1/health
 ```
 
 ### Resource Usage
@@ -418,8 +418,8 @@ docker stats finance-automation-app
 
 ## Useful Links
 
-- **API Documentation:** `http://YOUR_VPS_IP:8000/docs`
-- **Health Endpoint:** `http://YOUR_VPS_IP:8000/api/v1/health`
+- **API Documentation:** `http://YOUR_VPS_IP:8100/docs`
+- **Health Endpoint:** `http://YOUR_VPS_IP:8100/api/v1/health`
 - **Hetzner Console:** https://console.hetzner.cloud/
 - **Neon Console:** https://console.neon.tech/
 - **Discord Developer Portal:** https://discord.com/developers/applications

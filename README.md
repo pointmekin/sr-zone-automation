@@ -958,7 +958,7 @@ cp .env.example .env
 uv run python scripts/init_db.py
 
 # Start the API server
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8100
 ```
 
 #### Option 2: Using venv (Traditional)
@@ -990,12 +990,12 @@ cp .env.example .env
 python scripts/init_db.py
 
 # Start the API server
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8100 --reload
 ```
 
-The API will be available at [http://localhost:8000](http://localhost:8000)
+The API will be available at [http://localhost:8100](http://localhost:8100)
 
-Interactive documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
+Interactive documentation: [http://localhost:8100/docs](http://localhost:8100/docs)
 
 ### Important Notes
 
@@ -1274,9 +1274,9 @@ From the Nick Shawn framework:
 
 ### Interactive Documentation
 
-- **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
-- **OpenAPI JSON**: [http://localhost:8000/api/v1/openapi.json](http://localhost:8000/api/v1/openapi.json)
+- **Swagger UI**: [http://localhost:8100/docs](http://localhost:8100/docs)
+- **ReDoc**: [http://localhost:8100/redoc](http://localhost:8100/redoc)
+- **OpenAPI JSON**: [http://localhost:8100/api/v1/openapi.json](http://localhost:8100/api/v1/openapi.json)
 
 ### Key Endpoints
 
@@ -1331,15 +1331,15 @@ Scans all configured forex pairs for **active** A+ setups only. Returns maximum 
 **Example Usage:**
 ```bash
 # Scan with defaults (1h, summary mode)
-curl -X GET "http://localhost:8000/api/v1/signals/scan-all" \
+curl -X GET "http://localhost:8100/api/v1/signals/scan-all" \
   -H "Authorization: Bearer $TOKEN"
 
 # Scan 4h timeframe for end-of-day analysis
-curl -X GET "http://localhost:8000/api/v1/signals/scan-all?timeframe=4h" \
+curl -X GET "http://localhost:8100/api/v1/signals/scan-all?timeframe=4h" \
   -H "Authorization: Bearer $TOKEN"
 
 # Scan with higher confidence (only best setups)
-curl -X GET "http://localhost:8000/api/v1/signals/scan-all?min_confidence=0.8" \
+curl -X GET "http://localhost:8100/api/v1/signals/scan-all?min_confidence=0.8" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -1408,9 +1408,9 @@ SCAN_INTERVAL_MINUTES=15
 
 ## API Documentation
 
-- Interactive Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs)
-- ReDoc: [http://localhost:8000/redoc](http://localhost:8000/redoc)
-- OpenAPI JSON: [http://localhost:8000/api/v1/openapi.json](http://localhost:8000/api/v1/openapi.json)
+- Interactive Swagger UI: [http://localhost:8100/docs](http://localhost:8100/docs)
+- ReDoc: [http://localhost:8100/redoc](http://localhost:8100/redoc)
+- OpenAPI JSON: [http://localhost:8100/api/v1/openapi.json](http://localhost:8100/api/v1/openapi.json)
 
 ## License
 
