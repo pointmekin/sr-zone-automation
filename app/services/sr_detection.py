@@ -11,7 +11,8 @@ from typing import Optional, List, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.cluster import AgglomerativeClustering
+from scipy.stats import gaussian_kde
+from scipy.signal import find_peaks
 
 from app.models.market import MarketData, OHLCV
 from app.models.signals import SRZone, ZoneType
@@ -404,56 +405,61 @@ class SRDetectionService:
         sensitivity: Optional[float] = None
     ) -> List[SRZone]:
         """
-        Cluster pivot points into zones with improved algorithm.
-
-        Args:
-            pivots: List of pivot dictionaries
-            zone_type: SUPPORT or RESISTANCE
-            data: Market data
-            df: DataFrame with market data
-            atr: ATR value
-            sensitivity: Override sensitivity
-
-        Returns:
-            List of SRZone objects
+        Cluster pivot points into zones using Time-Weighted Kernel Density Estimation (KDE).
         """
         if not pivots or len(pivots) < self.min_touches:
             return []
 
-        threshold = self._calculate_dynamic_threshold(df, pivots, atr, sensitivity)
+        prices_arr = np.array([p['price'] for p in pivots])
+        indices_arr = np.array([p['index'] for p in pivots])
+        current_price = float(df['close'].iloc[-1])
+        total_candles = len(df)
 
-        prices = np.array([[p['price']] for p in pivots])
+        # 1. Time-Decay Weighting
+        decay_factor = 0.98
+        weights = np.array([decay_factor ** (total_candles - idx - 1) for idx in indices_arr])
+        
+        # Ensure weights don't vanish entirely to prevent NaNs
+        weights = np.clip(weights, 1e-10, 1.0)
 
         try:
-            clustering = AgglomerativeClustering(
-                n_clusters=None,
-                distance_threshold=threshold,
-                linkage='average'
-            )
+            # 2. Kernel Density Estimation
+            kde = gaussian_kde(prices_arr, weights=weights, bw_method='scott')
 
-            labels = clustering.fit_predict(prices)
+            price_min, price_max = np.min(prices_arr), np.max(prices_arr)
+            padding = atr * 2 if atr > 0 else current_price * 0.01
+            price_grid = np.linspace(price_min - padding, price_max + padding, 1000)
+            density = kde(price_grid)
 
-            # Group pivots by cluster
-            clusters = {}
-            for idx, label in enumerate(labels):
-                if label not in clusters:
-                    clusters[label] = []
-                clusters[label].append(pivots[idx])
+            # Convert ATR threshold to grid indices to ensure peaks don't overlap
+            grid_step = (price_max - price_min + padding * 2) / 1000
+            min_distance_idx = max(int((atr * self.sensitivity_atr) / grid_step), 10) if atr > 0 else 10
 
-            # Post-process: merge clusters that are too close
-            merged_clusters = self._merge_nearby_clusters(clusters, threshold * 0.5)
+            peaks, _ = find_peaks(density, distance=min_distance_idx)
 
-            # Create zones from clusters
             zones = []
-            for cluster_pivots in merged_clusters.values():
-                if len(cluster_pivots) < self.min_touches:
+            for peak_idx in peaks:
+                peak_price = float(price_grid[peak_idx])
+
+                # Proximity Filtering
+                distance_to_current = abs(current_price - peak_price)
+                if atr > 0 and distance_to_current > (atr * 3):
+                    continue
+                
+                # Fetch pivots near this peak to construct the zone attributes
+                local_mask = np.abs(prices_arr - peak_price) < (atr if atr > 0 else peak_price * 0.005)
+                local_pivots = [pivots[i] for i in range(len(pivots)) if local_mask[i]]
+
+                if len(local_pivots) < self.min_touches:
                     continue
 
-                zone = self._create_zone_from_cluster(
-                    cluster_pivots,
-                    zone_type,
-                    data,
-                    df
+                zone = self._create_zone_from_kde(
+                    peak_price=peak_price,
+                    cluster_pivots=local_pivots,
+                    zone_type=zone_type,
+                    data=data,
+                    atr=atr,
+                    distance_to_current=distance_to_current
                 )
 
                 if zone and zone.strength >= self.min_strength:
@@ -462,7 +468,7 @@ class SRDetectionService:
             return zones
 
         except Exception as e:
-            logger.warning(f"Clustering failed: {e}, using fallback")
+            logger.warning(f"KDE Clustering failed: {e}, using fallback")
             return self._fallback_clustering(pivots, zone_type, data, df)
 
     def _merge_nearby_clusters(
@@ -657,64 +663,63 @@ class SRDetectionService:
 
         return 0.0
 
-    def _create_zone_from_cluster(
+    def _create_zone_from_kde(
         self,
+        peak_price: float,
         cluster_pivots: List[dict],
         zone_type: ZoneType,
         data: MarketData,
-        df: pd.DataFrame
+        atr: float,
+        distance_to_current: float
     ) -> Optional[SRZone]:
         """
-        Create SRZone object from cluster of pivots.
-
-        Args:
-            cluster_pivots: List of pivots in the cluster
-            zone_type: SUPPORT or RESISTANCE
-            data: Market data
-            df: DataFrame
-
-        Returns:
-            SRZone object or None
+        Create SRZone object strictly from KDE peak and proximity data.
         """
         if not cluster_pivots:
             return None
 
+        # Base attributes
+        level = peak_price
         prices = [p['price'] for p in cluster_pivots]
-        level = float(np.mean(prices))
+        
+        # Dynamic Width via localized Standard Deviation
+        if len(prices) > 1:
+            std_dev = np.std(prices)
+            zone_half_width = max(std_dev * 1.5, atr * 0.1) if atr > 0 else max(std_dev * 1.5, level * 0.001)
+        else:
+            zone_half_width = atr * 0.5 if atr > 0 else level * 0.005
 
-        # Check for round number proximity
+        if zone_type == ZoneType.SUPPORT:
+            lower = level - zone_half_width
+            upper = level + zone_half_width * 0.5
+        else:
+            lower = level - zone_half_width * 0.5
+            upper = level + zone_half_width
+
+        price_range = (float(lower), float(upper))
+        
+        # Proximity weight
+        relevance_score = 1.0 / (1.0 + (distance_to_current / atr)) if atr > 0 else 1.0
+
+        # Optional factors
         round_number_factor = self._check_round_number_proximity(level)
-
-        # Calculate strength
-        strength_data = self._calculate_strength_improved(
-            cluster_pivots,
-            len(data.data)
-        )
-
-        # Boost strength slightly for psychological levels
-        adjusted_strength = min(
-            strength_data['strength'] * (1 + round_number_factor * 0.1),
-            1.0
-        )
-
-        # Calculate price range
-        price_range = self._calculate_zone_width(level, df, zone_type)
-
-        # Get pivot indices
+        strength_data = self._calculate_strength_improved(cluster_pivots, len(data.data))
+        
+        # Scale strength with proximity relevance
+        base_strength = strength_data['strength']
+        adjusted_strength = min(base_strength * relevance_score * (1 + round_number_factor * 0.1), 1.0)
+        
         pivot_indices = [p['index'] for p in cluster_pivots]
-
-        # Calculate volume at zone
         volume_at_zone = float(np.mean([p.get('volume', 0) for p in cluster_pivots]))
-
-        # Get timestamps
+        
         sorted_pivots = sorted(cluster_pivots, key=lambda x: x['index'])
         first_touch_date = sorted_pivots[0]['timestamp']
         last_touch_date = sorted_pivots[-1]['timestamp']
 
         return SRZone(
-            level=level,
+            level=float(level),
             zone_type=zone_type,
-            strength=adjusted_strength,
+            strength=float(adjusted_strength),
             is_fresh=strength_data['is_fresh'],
             touches=len(cluster_pivots),
             last_touch_date=last_touch_date,
@@ -727,6 +732,7 @@ class SRDetectionService:
             touch_score=strength_data['touch_score'],
             recency_score=strength_data['recency_score'],
             price_range=price_range,
+            distance_to_current=float(distance_to_current)
         )
 
     def _calculate_zone_width(

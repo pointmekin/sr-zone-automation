@@ -54,6 +54,10 @@ class SRZone(BaseModel):
     )
 
     # Improved fields for enhanced zone analysis
+    distance_to_current: Optional[float] = Field(
+        default=None,
+        description="Distance from the zone center to the current trading price"
+    )
     first_touch_date: Optional[datetime] = Field(
         default=None,
         description="Timestamp of first touch (zone origin)"

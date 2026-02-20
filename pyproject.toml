@@ -18,6 +18,7 @@ dependencies = [
     "numpy>=2.2.0",
     # Machine Learning (Clustering)
     "scikit-learn>=1.6.0",
+    "scipy>=1.14.0",
     # Database
     "sqlalchemy>=2.0.36",
     "alembic>=1.14.0",
