@@ -63,14 +63,14 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # Expose port
-EXPOSE 8000
+EXPOSE 8100
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/health || exit 1
+    CMD curl -f http://localhost:8100/api/v1/health || exit 1
 
 # Set entrypoint to fix permissions before starting
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100"]
