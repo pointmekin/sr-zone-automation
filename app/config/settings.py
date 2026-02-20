@@ -263,6 +263,52 @@ class Settings(BaseSettings):
     rate_limit_requests: int = Field(default=100, ge=1, description="Max requests per window")
     rate_limit_window_seconds: int = Field(default=60, ge=1, description="Rate limit window in seconds")
 
+    # Concurrency Configuration
+    max_concurrent_tickers: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum concurrent ticker scans in scan-all endpoint"
+    )
+
+    # Cache Configuration
+    enable_caching: bool = Field(
+        default=True,
+        description="Enable caching for SR zones and market data"
+    )
+    cache_max_size_sr_zones: int = Field(
+        default=100,
+        ge=10,
+        le=1000,
+        description="Maximum SR zone cache entries"
+    )
+    cache_max_size_market_data: int = Field(
+        default=50,
+        ge=10,
+        le=500,
+        description="Maximum market data cache entries"
+    )
+    cache_ttl_sr_zones_multiplier: float = Field(
+        default=2.0,
+        ge=0.5,
+        le=10.0,
+        description="Multiplier for SR zone TTL (2.0 = 2x timeframe)"
+    )
+    cache_ttl_market_data_multiplier: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=5.0,
+        description="Multiplier for market data TTL (1.0 = 1x timeframe)"
+    )
+    enable_cache_warming: bool = Field(
+        default=False,
+        description="Pre-warm cache on startup for default tickers"
+    )
+    cache_warming_timeframes: List[str] = Field(
+        default=["1h", "4h"],
+        description="Timeframes to pre-warm on startup"
+    )
+
 
 # Global settings instance
 _settings: Optional[Settings] = None

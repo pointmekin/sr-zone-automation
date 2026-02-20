@@ -5,7 +5,8 @@ Provides endpoints for detecting trading signals including
 Big Wick, Three Pulse, and A+ setups.
 """
 
-from typing import Annotated, List
+import asyncio
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
@@ -21,6 +22,18 @@ from app.db.models.user import User
 from app.services.pattern_detection import PatternDetectionService
 from app.services.data_service import DataService
 from loguru import logger
+
+
+router = APIRouter(prefix="/signals", tags=["signals"])
+
+
+class TickerScanError(Exception):
+    """Exception raised during ticker scan processing."""
+    def __init__(self, ticker: str, stage: str, cause: Exception):
+        self.ticker = ticker
+        self.stage = stage  # 'fetch_current', 'detect_setups', 'filter'
+        self.cause = cause
+        super().__init__(f"Error scanning {ticker} at {stage}: {cause}")
 
 
 router = APIRouter(prefix="/signals", tags=["signals"])
@@ -173,6 +186,108 @@ async def detect_a_plus_setups(
     )
 
 
+async def _process_single_ticker_scan(
+    ticker: str,
+    timeframe: str,
+    min_confidence: float,
+    data_service: DataService,
+    pattern_service: PatternDetectionService,
+    semaphore: asyncio.Semaphore
+) -> tuple[str, Optional[SignalResponse]]:
+    """
+    Process a single ticker scan for A+ setups.
+
+    Args:
+        ticker: Ticker symbol to scan
+        timeframe: Chart timeframe
+        min_confidence: Minimum confidence threshold
+        data_service: Data service instance
+        pattern_service: Pattern detection service instance
+        semaphore: Semaphore for concurrency control
+
+    Returns:
+        Tuple of (ticker, setup) where setup is SignalResponse or None
+
+    Raises:
+        TickerScanError: If processing fails at any stage
+    """
+    async with semaphore:
+        try:
+            # Stage 1: Fetch current market data
+            try:
+                market_data = await data_service.fetch_data(
+                    ticker=ticker,
+                    timeframe=timeframe,
+                    lookback_bars=100
+                )
+            except Exception as e:
+                raise TickerScanError(ticker, 'fetch_current', e) from e
+
+            if not market_data.data:
+                logger.warning(f"No data available for {ticker}")
+                return (ticker, None)
+
+            latest_close = market_data.data[-1].close
+            latest_time = market_data.data[-1].timestamp
+
+            # Normalize timestamp to naive
+            if latest_time.tzinfo is not None:
+                latest_time = latest_time.replace(tzinfo=None)
+
+            # Stage 2: Detect A+ setups
+            try:
+                setups = await pattern_service.detect_a_plus_setups(
+                    ticker=ticker,
+                    timeframe=timeframe,
+                    lookback_bars=500,
+                    min_confidence=min_confidence
+                )
+            except Exception as e:
+                raise TickerScanError(ticker, 'detect_setups', e) from e
+
+            if not setups:
+                return (ticker, None)
+
+            # Stage 3: Filter to active setups
+            active_setups = []
+            for setup in setups:
+                zone = setup.big_wick.sr_zone
+                zone_lower, zone_upper = zone.price_range
+
+                # Check if price is currently within zone bounds
+                price_in_zone = zone_lower <= latest_close <= zone_upper
+
+                # Check if setup is very recent (within last hour)
+                setup_age_minutes = (latest_time - setup.detected_at).total_seconds() / 60
+                is_recent = setup_age_minutes <= 60
+
+                # Check if price is near zone (within 0.15%)
+                price_near_zone = abs(latest_close - zone.level) / zone.level <= 0.0015
+
+                # Include if price is at/near zone OR setup is very recent
+                if price_in_zone or price_near_zone or is_recent:
+                    active_setups.append(setup)
+
+            if not active_setups:
+                return (ticker, None)
+
+            # Stage 4: Select best signal per ticker
+            active_setups.sort(
+                key=lambda s: (s.combined_confidence, s.detected_at),
+                reverse=True
+            )
+
+            logger.info(f"Successfully scanned {ticker}: {len(active_setups)} active setup(s)")
+            return (ticker, active_setups[0])
+
+        except TickerScanError:
+            # Re-raise TickerScanError to be caught by gather
+            raise
+        except Exception as e:
+            # Wrap any other exceptions
+            raise TickerScanError(ticker, 'unknown', e) from e
+
+
 @router.get("/scan-all")
 async def scan_all_tickers(
     timeframe: str = Query(default="1h", description="Chart timeframe"),
@@ -221,71 +336,51 @@ async def scan_all_tickers(
     from datetime import timedelta
     settings = get_settings()
 
-    # Get current price for each ticker and filter to active signals only
+    # Semaphore for concurrency control (max 3 concurrent tickers)
+    MAX_CONCURRENT_TICKERS = 3
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_TICKERS)
+
+    # Create concurrent tasks for all tickers
+    logger.info(f"Starting concurrent scan of {len(settings.default_tickers)} tickers (max {MAX_CONCURRENT_TICKERS} concurrent)")
+
+    tasks = [
+        _process_single_ticker_scan(
+            ticker=ticker,
+            timeframe=timeframe,
+            min_confidence=min_confidence,
+            data_service=data_service,
+            pattern_service=pattern_service,
+            semaphore=semaphore
+        )
+        for ticker in settings.default_tickers
+    ]
+
+    # Execute all tasks concurrently with exception handling
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Process results and handle errors
     active_signals = {}
+    failed_tickers = []
 
-    for ticker in settings.default_tickers:
-        try:
-            # Fetch current market data to get latest price
-            market_data = await data_service.fetch_data(
-                ticker=ticker,
-                timeframe=timeframe,
-                lookback_bars=100  # Only need recent data
-            )
+    for result in results:
+        if isinstance(result, Exception):
+            # Handle TickerScanError or other exceptions
+            logger.error(f"Ticker scan failed: {result}")
+            if isinstance(result, TickerScanError):
+                failed_tickers.append(f"{result.ticker} ({result.stage})")
+            continue
 
-            if not market_data.data:
-                logger.warning(f"No data available for {ticker}")
-                continue
+        ticker, setup = result
+        if setup:
+            active_signals[ticker] = setup
 
-            latest_close = market_data.data[-1].close
-            latest_time = market_data.data[-1].timestamp
-
-            # Detect all setups
-            setups = await pattern_service.detect_a_plus_setups(
-                ticker=ticker,
-                timeframe=timeframe,
-                lookback_bars=500,
-                min_confidence=min_confidence
-            )
-
-            if not setups:
-                continue
-
-            # Filter to active setups only (price near zone OR very recent)
-            active_setups = []
-            for setup in setups:
-                zone = setup.big_wick.sr_zone
-                zone_lower, zone_upper = zone.price_range
-
-                # Check if price is currently within zone bounds
-                price_in_zone = zone_lower <= latest_close <= zone_upper
-
-                # Check if setup is very recent (within last 2 bars)
-                setup_age_minutes = (latest_time - setup.detected_at).total_seconds() / 60
-                is_recent = setup_age_minutes <= 60  # Within last hour for 1h timeframe
-
-                # Check if price is near zone (within 0.15%)
-                price_near_zone = abs(latest_close - zone.level) / zone.level <= 0.0015
-
-                # Include if price is at/near zone OR setup is very recent
-                if price_in_zone or price_near_zone or is_recent:
-                    active_setups.append(setup)
-
-            if not active_setups:
-                continue
-
-            # Select only 1 signal per ticker: highest confidence, most recent
-            # Sort by confidence (desc), then by detected_at (desc)
-            active_setups.sort(
-                key=lambda s: (s.combined_confidence, s.detected_at),
-                reverse=True
-            )
-
-            # Keep only the best signal per ticker
-            active_signals[ticker] = active_setups[0]
-
-        except Exception as e:
-            logger.error(f"Error scanning {ticker}: {e}")
+    # Log summary
+    successful = len(active_signals)
+    failed = len(failed_tickers)
+    logger.info(
+        f"Concurrent scan complete: {successful} successful, {failed} failed. "
+        f"Failed tickers: {', '.join(failed_tickers) if failed_tickers else 'None'}"
+    )
 
     # Build response
     if summary:
