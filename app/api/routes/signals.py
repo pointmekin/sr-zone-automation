@@ -240,6 +240,10 @@ async def scan_all_tickers(
             latest_close = market_data.data[-1].close
             latest_time = market_data.data[-1].timestamp
 
+            # Normalize timestamp to naive (remove timezone info if present)
+            if latest_time.tzinfo is not None:
+                latest_time = latest_time.replace(tzinfo=None)
+
             # Detect all setups
             setups = await pattern_service.detect_a_plus_setups(
                 ticker=ticker,

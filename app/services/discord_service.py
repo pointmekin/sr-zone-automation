@@ -40,7 +40,8 @@ class DiscordBot(commands.Bot):
 
         super().__init__(
             command_prefix="!",
-            intents=intents
+            intents=intents,
+            help_command=None  # Disable built-in help command (we have custom one)
         )
 
         self.pattern_service = pattern_service
